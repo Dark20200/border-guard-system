@@ -1,0 +1,161 @@
+:root{
+  --bg:#0f1115;
+  --panel:rgba(23, 26, 33, 0.9);
+  --panel-2:rgba(29, 33, 42, 0.9);
+  --line:#2a2f3a;
+  --text:#dcdfe4;
+  --muted:#8b909c;
+  --accent:#3b82f6;
+  --accent-hover:#2f6fd8;
+  --green:#2f9e5b;
+  --green-hover:#247c47;
+  --red:#d64545;
+  --red-hover:#b53838;
+  --amber:#c99a3a;
+  --amber-hover:#a67c2b;
+}
+*{ box-sizing:border-box; }
+html,body{ height:100%; margin:0; }
+body{
+  background-image: url('../assets/bg.png');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+  color:var(--text);
+  font-family:'Tajawal', 'Segoe UI', sans-serif;
+  font-size:14px;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(15, 17, 21, 0.75);
+  z-index: -1;
+}
+
+::-webkit-scrollbar{ width:8px; height:8px; }
+::-webkit-scrollbar-track{ background:transparent; }
+::-webkit-scrollbar-thumb{ background:var(--line); border-radius:4px; }
+
+.card{
+  background:var(--panel);
+  backdrop-filter: blur(8px);
+  border:1px solid var(--line);
+  border-radius:8px;
+}
+
+.btn{
+  background:var(--accent);
+  color:#fff;
+  font-weight:500;
+  border-radius:6px;
+  transition:background .15s ease;
+}
+.btn:hover{ background:var(--accent-hover); }
+.btn:disabled{ opacity:.5; cursor:not-allowed; }
+
+.btn-outline{
+  background:transparent;
+  border:1px solid var(--line);
+  color:var(--text);
+  border-radius:6px;
+  transition:border-color .15s ease, background .15s ease;
+}
+.btn-outline:hover{ background:var(--panel-2); border-color:#3a4150; }
+
+.btn-success { background: var(--green); color: #fff; }
+.btn-success:hover { background: var(--green-hover); }
+
+.btn-danger { background: var(--red); color: #fff; }
+.btn-danger:hover { background: var(--red-hover); }
+
+.btn-warning { background: var(--amber); color: #fff; border: 1px solid var(--amber); }
+.btn-warning:hover { background: var(--amber-hover); border-color: var(--amber-hover); }
+
+.btn-logout {
+  border: 1px solid #4a2222;
+  color: #e26767;
+  background: transparent;
+  transition: all .2s ease;
+}
+.btn-logout:hover {
+  background: #291a1a;
+  border-color: #d64545;
+  color: #ff8080;
+}
+
+.tab{
+  color:var(--muted);
+  border-bottom:2px solid transparent;
+  transition:color .15s ease, border-color .15s ease;
+}
+.tab.active{ color:var(--text); border-color:var(--accent); }
+.tab:not(.active):hover{ color:var(--text); }
+
+.chip{
+  border:1px solid var(--line);
+  color:var(--muted);
+  border-radius:6px;
+  transition:background .15s ease, color .15s ease, border-color .15s ease;
+  cursor:pointer;
+}
+.chip.active{ background:var(--panel-2); color:var(--text); border-color:#3a4150; }
+
+.row{
+  border-bottom:1px solid var(--line);
+  transition:background .1s ease;
+}
+.row:hover{ background:var(--panel-2); }
+.row:last-child{ border-bottom:none; }
+
+@keyframes fadeIn{ from{opacity:0;} to{opacity:1;} }
+.fade{ animation:fadeIn .18s ease both; }
+
+@keyframes bellPulseInterval {
+  0%   { transform: rotate(0deg); }
+  5%   { transform: rotate(10deg); }
+  10%  { transform: rotate(-10deg); }
+  15%  { transform: rotate(8deg); }
+  20%  { transform: rotate(-8deg); }
+  25%  { transform: rotate(4deg); }
+  30%  { transform: rotate(0deg); }
+  100% { transform: rotate(0deg); }
+}
+
+.bell-shaking {
+  animation: bellPulseInterval 4s ease-in-out infinite;
+  transform-origin: top center;
+}
+
+.spinner{
+  width:16px; height:16px;
+  border:2px solid var(--line);
+  border-top-color:var(--accent);
+  border-radius:50%;
+  animation:spin .7s linear infinite;
+}
+@keyframes spin{ to{ transform:rotate(360deg); } }
+
+.toast{ animation:fadeIn .15s ease both; }
+
+.avatar{
+  width:36px; height:36px;
+  border-radius:50%;
+  background:var(--panel-2);
+  border:1px solid var(--line);
+  display:flex; align-items:center; justify-content:center;
+  font-size:13px; font-weight:700;
+  color:var(--text);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.avatar img { width: 100%; height: 100%; object-fit: cover; }
+
+code, .mono{ font-family: ui-monospace, Consolas, monospace; direction:ltr; unicode-bidi:plaintext; }
+.focus-ring:focus-visible{ outline:2px solid var(--accent); outline-offset:1px; }
+
+@media (prefers-reduced-motion: reduce){
+  *{ animation-duration:0.001ms !important; transition-duration:0.001ms !important; }
+}

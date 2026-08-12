@@ -1,0 +1,411 @@
+import express from 'express';
+import cors from 'cors';
+import dotenv from 'dotenv';
+import session from 'express-session';
+import createMemoryStore from 'memorystore';
+import passport from 'passport';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import fs from 'fs';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
+
+import { setupAuth } from './server/auth.js';
+import { setupApiRoutes } from './server/api.js';
+import { getSheetData, getCharacterNameFromSheet, getRankFromSheet } from './server/sheets.js';
+
+dotenv.config();
+
+const app = express();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const MemoryStore = createMemoryStore(session);
+const isProd = process.env.NODE_ENV === 'production';
+
+if (isProd && !process.env.SESSION_SECRET) {
+    console.error('خطأ: لازم تحدد SESSION_SECRET في ملف .env قبل تشغيل السيرفر في وضع الإنتاج');
+    process.exit(1);
+}
+
+app.use(helmet({
+    contentSecurityPolicy: false 
+}));
+
+app.set('trust proxy', 1);
+
+const generalLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 300,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { success: false, error: 'طلبات كتير جدًا، حاول تاني بعد شوية' }
+});
+
+const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 20,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { success: false, error: 'محاولات دخول كتير، حاول تاني بعد شوية' }
+});
+
+app.use('/api', generalLimiter);
+app.use('/auth', authLimiter);
+
+app.use(express.json({ limit: '200kb' }));
+
+app.use(cors({
+    origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
+    credentials: true
+}));
+
+app.use(session({
+    secret: process.env.SESSION_SECRET || 'dev-only-secret-change-me',
+    resave: false,
+    saveUninitialized: false,
+    store: new MemoryStore({ checkPeriod: 86400000 }),
+    cookie: {
+        secure: isProd,
+        httpOnly: true,
+        sameSite: 'lax',
+        maxAge: 24 * 60 * 60 * 1000
+    }
+}));
+
+app.use(passport.initialize());
+app.use(passport.session());
+
+const BLOCKED_PATHS = ['/data', '/server', '/.env', '/server.js', '/build.js', '/js', '/package.json', '/package-lock.json', '/node_modules', '/.git'];
+app.use((req, res, next) => {
+    const p = req.path;
+    if (BLOCKED_PATHS.some(b => p === b || p.startsWith(b + '/'))) {
+        return res.status(404).end();
+    }
+    next();
+});
+
+app.use(express.static(__dirname, { dotfiles: 'deny', index: 'index.html' }));
+
+setupAuth(passport);
+setupApiRoutes(app);
+
+function listDirs(p) {
+    if (!fs.existsSync(p)) return [];
+    return fs.readdirSync(p).filter(f => {
+        try { return fs.statSync(path.join(p, f)).isDirectory(); } catch { return false; }
+    });
+}
+
+function readAllRecords() {
+    const soldiersDir = path.join(__dirname, 'data', 'soldiers');
+    const records = [];
+
+    listDirs(soldiersDir).forEach(soldierId => {
+        const soldierPath = path.join(soldiersDir, soldierId);
+        listDirs(soldierPath).forEach(typeDir => {
+            const typePath = path.join(soldierPath, typeDir);
+            const files = fs.readdirSync(typePath).filter(f => f.endsWith('.json'));
+            files.forEach(file => {
+                try {
+                    const filePath = path.join(typePath, file);
+                    const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+                    records.push({ ...data, soldierId, typeFolder: typeDir, fileName: file });
+                } catch (err) {}
+            });
+        });
+    });
+
+    return records;
+}
+
+function recordTimestamp(rec) {
+    return rec.savedAt ? new Date(rec.savedAt).getTime() : 0;
+}
+
+let sheetCache = { data: null, at: 0 };
+const SHEET_CACHE_TTL = 60 * 1000;
+
+async function getSheetMap() {
+    const now = Date.now();
+    if (sheetCache.data && (now - sheetCache.at) < SHEET_CACHE_TTL) {
+        return sheetCache.data;
+    }
+    const map = {};
+    try {
+        const rows = await getSheetData('A:E');
+        (rows || []).forEach(row => {
+            const cleanId = row[0] ? String(row[0]).replace(/[^0-9]/g, '') : '';
+            if (cleanId) {
+                map[cleanId] = {
+                    name: row[2] ? String(row[2]).trim() : '',
+                    code: row[3] ? String(row[3]).trim() : '',
+                    rank: row[4] ? String(row[4]).trim() : ''
+                };
+            }
+        });
+    } catch (e) {
+        console.error('تعذر تحميل بيانات الشيت:', e.message);
+    }
+    sheetCache = { data: map, at: now };
+    return map;
+}
+
+function displayFor(id, sheetMap) {
+    const info = sheetMap[id];
+    if (!info || !info.name) return { id, name: null, code: null, display: id };
+    const display = info.code ? `[${info.code}] ${info.name}` : info.name;
+    return { id, name: info.name, code: info.code || null, display };
+}
+
+function resolveMentions(text, sheetMap) {
+    if (!text) return [];
+    const ids = [...String(text).matchAll(/<@!?(\d+)>/g)].map(m => m[1]);
+    return ids.map(id => displayFor(id, sheetMap));
+}
+
+async function enrichRecords(records) {
+    const sheetMap = await getSheetMap();
+    return records.map(rec => {
+        const officerPeople = resolveMentions(rec.officer, sheetMap);
+        const soldierPeople = resolveMentions(rec.soldier, sheetMap);
+        const soldierIdInfo = rec.soldierId ? displayFor(rec.soldierId, sheetMap) : null;
+        return {
+            ...rec,
+            officerInfo: officerPeople[0] || null,
+            officerDisplay: officerPeople[0] ? officerPeople[0].display : rec.officer,
+            soldiersInfo: soldierPeople,
+            soldiersDisplay: soldierPeople.map(s => s.display).join('، '),
+            soldierIdInfo,
+            soldierIdDisplay: soldierIdInfo ? soldierIdInfo.display : rec.soldierId
+        };
+    });
+}
+
+app.get('/api/stats', (req, res) => {
+    if (!req.isAuthenticated()) return res.status(403).json({ success: false, error: 'غير مصرح لك' });
+    try {
+        const records = readAllRecords();
+        const totalPenalties = records.length;
+        const totalOffenders = new Set(records.map(r => r.soldierId)).size;
+
+        const now = new Date();
+        const monthlyDecisions = records.filter(r => {
+            if (!r.savedAt) return false;
+            const d = new Date(r.savedAt);
+            return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+        }).length;
+
+        const typeBreakdown = {};
+        records.forEach(r => {
+            const t = r.type || r.typeFolder || 'غير محدد';
+            typeBreakdown[t] = (typeBreakdown[t] || 0) + 1;
+        });
+
+        res.json({
+            success: true,
+            totalPenalties,
+            totalOffenders,
+            monthlyDecisions,
+            typeBreakdown,
+            totalTypes: Object.keys(typeBreakdown).length
+        });
+    } catch (error) {
+        console.error("خطأ في جلب الإحصائيات:", error);
+        res.status(500).json({ success: false, message: "خطأ في السيرفر" });
+    }
+});
+
+app.get('/api/search', async (req, res) => {
+    if (!req.isAuthenticated()) return res.status(403).json({ success: false, error: 'غير مصرح لك' });
+    try {
+        const query = (req.query.q || '').trim().toLowerCase();
+        if (!query) return res.json({ success: true, data: [] });
+
+        const matched = readAllRecords()
+            .filter(rec => rec.soldierId.toLowerCase().includes(query) || JSON.stringify(rec).toLowerCase().includes(query))
+            .sort((a, b) => recordTimestamp(b) - recordTimestamp(a));
+
+        res.json({ success: true, data: await enrichRecords(matched) });
+    } catch (error) {
+        console.error("خطأ في البحث:", error);
+        res.status(500).json({ success: false, message: "فشل البحث في السجلات" });
+    }
+});
+
+app.get('/api/records', async (req, res) => {
+    if (!req.isAuthenticated()) return res.status(403).json({ success: false, error: 'غير مصرح لك' });
+    try {
+        const { q = '', type = '', officer = '', soldier = '', dateFrom = '', dateTo = '', page = '1', limit = '10', sort = 'desc' } = req.query;
+
+        const all = readAllRecords();
+        const types = [...new Set(all.map(r => r.type || r.typeFolder).filter(Boolean))];
+
+        const qLower = q.trim().toLowerCase();
+        const officerLower = officer.trim().toLowerCase();
+        const soldierLower = soldier.trim().toLowerCase();
+
+        let filtered = all.filter(rec => {
+            if (type && (rec.type || rec.typeFolder) !== type) return false;
+            if (officerLower && !String(rec.officer || '').toLowerCase().includes(officerLower)) return false;
+            if (soldierLower && !(rec.soldierId.toLowerCase().includes(soldierLower) || String(rec.soldier || '').toLowerCase().includes(soldierLower))) return false;
+            if (qLower && !JSON.stringify(rec).toLowerCase().includes(qLower)) return false;
+            if (dateFrom) {
+                const from = new Date(dateFrom).getTime();
+                if (!isNaN(from) && recordTimestamp(rec) < from) return false;
+            }
+            if (dateTo) {
+                const to = new Date(dateTo).getTime() + 24 * 60 * 60 * 1000 - 1;
+                if (!isNaN(to) && recordTimestamp(rec) > to) return false;
+            }
+            return true;
+        });
+
+        filtered.sort((a, b) => sort === 'asc' ? recordTimestamp(a) - recordTimestamp(b) : recordTimestamp(b) - recordTimestamp(a));
+
+        const pageNum = Math.max(1, parseInt(page) || 1);
+        const limitNum = Math.min(100, Math.max(1, parseInt(limit) || 10));
+        const total = filtered.length;
+        const totalPages = Math.max(1, Math.ceil(total / limitNum));
+        const start = (pageNum - 1) * limitNum;
+
+        const pageRecords = filtered.slice(start, start + limitNum);
+
+        res.json({
+            success: true,
+            data: await enrichRecords(pageRecords),
+            total,
+            page: pageNum,
+            limit: limitNum,
+            totalPages,
+            types
+        });
+    } catch (error) {
+        console.error("خطأ في جلب السجلات:", error);
+        res.status(500).json({ success: false, message: "فشل جلب السجلات" });
+    }
+});
+
+app.get('/api/soldiers', async (req, res) => {
+    if (!req.isAuthenticated()) return res.status(403).json({ success: false, error: 'غير مصرح لك' });
+    try {
+        const { q = '', page = '1', limit = '12' } = req.query;
+        const soldiersDir = path.join(__dirname, 'data', 'soldiers');
+
+        let soldiers = listDirs(soldiersDir).map(id => {
+            const soldierPath = path.join(soldiersDir, id);
+            let totalRecords = 0;
+            let typesCount = {};
+            let lastSavedAt = null;
+
+            listDirs(soldierPath).forEach(typeDir => {
+                const typePath = path.join(soldierPath, typeDir);
+                const files = fs.readdirSync(typePath).filter(f => f.endsWith('.json'));
+                typesCount[typeDir] = files.length;
+                totalRecords += files.length;
+
+                files.forEach(file => {
+                    try {
+                        const data = JSON.parse(fs.readFileSync(path.join(typePath, file), 'utf8'));
+                        if (data.savedAt && (!lastSavedAt || new Date(data.savedAt) > new Date(lastSavedAt))) {
+                            lastSavedAt = data.savedAt;
+                        }
+                    } catch (err) {}
+                });
+            });
+
+            return { id, totalRecords, typesCount, lastSavedAt };
+        });
+
+        try {
+            const sheetMap = await getSheetMap();
+            soldiers = soldiers.map(s => {
+                const info = sheetMap[s.id];
+                const rpName = info && info.name ? (info.code ? `[${info.code}] ${info.name}` : info.name) : null;
+                return { ...s, rpName, rank: info ? info.rank || null : null };
+            });
+        } catch (e) {
+        }
+
+        const qLower = q.trim().toLowerCase();
+        let filtered = soldiers.filter(s => !qLower || s.id.includes(qLower) || (s.rpName && s.rpName.toLowerCase().includes(qLower)));
+        filtered.sort((a, b) => {
+            const ta = a.lastSavedAt ? new Date(a.lastSavedAt).getTime() : 0;
+            const tb = b.lastSavedAt ? new Date(b.lastSavedAt).getTime() : 0;
+            return tb - ta;
+        });
+
+        const pageNum = Math.max(1, parseInt(page) || 1);
+        const limitNum = Math.min(50, Math.max(1, parseInt(limit) || 12));
+        const total = filtered.length;
+        const totalPages = Math.max(1, Math.ceil(total / limitNum));
+        const start = (pageNum - 1) * limitNum;
+
+        res.json({ success: true, data: filtered.slice(start, start + limitNum), total, page: pageNum, limit: limitNum, totalPages });
+    } catch (error) {
+        console.error("خطأ في جلب قائمة الأعضاء:", error);
+        res.status(500).json({ success: false, message: "فشل جلب قائمة الأعضاء" });
+    }
+});
+
+app.get('/api/soldiers/:id', async (req, res) => {
+    if (!req.isAuthenticated()) return res.status(403).json({ success: false, error: 'غير مصرح لك' });
+    try {
+        const soldierId = req.params.id.replace(/[^0-9]/g, '');
+        const soldierPath = path.join(__dirname, 'data', 'soldiers', soldierId);
+
+        if (!soldierId || !fs.existsSync(soldierPath)) {
+            return res.status(404).json({ success: false, message: 'لا توجد سجلات لهذا العسكري' });
+        }
+
+        let records = [];
+        const typesCount = {};
+
+        listDirs(soldierPath).forEach(typeDir => {
+            const typePath = path.join(soldierPath, typeDir);
+            const files = fs.readdirSync(typePath).filter(f => f.endsWith('.json'));
+            typesCount[typeDir] = files.length;
+            files.forEach(file => {
+                try {
+                    const data = JSON.parse(fs.readFileSync(path.join(typePath, file), 'utf8'));
+                    records.push({ ...data, soldierId, typeFolder: typeDir });
+                } catch (err) {}
+            });
+        });
+
+        records.sort((a, b) => recordTimestamp(b) - recordTimestamp(a));
+        records = await enrichRecords(records);
+
+        let rpName = null, rank = null;
+        try {
+            rpName = await getCharacterNameFromSheet(soldierId);
+            rank = await getRankFromSheet(soldierId);
+        } catch (e) {}
+
+        res.json({ success: true, id: soldierId, rpName, rank, totalRecords: records.length, typesCount, data: records });
+    } catch (error) {
+        console.error("خطأ في جلب بيانات العسكري:", error);
+        res.status(500).json({ success: false, message: "فشل جلب بيانات العسكري" });
+    }
+});
+
+app.get('/auth/discord', (req, res, next) => {
+    if (req.query.rpName) req.session.rpName = req.query.rpName;
+    passport.authenticate('discord')(req, res, next);
+});
+
+app.get('/auth/discord/callback', passport.authenticate('discord', {
+    failureRedirect: '/index.html?error=not_in_sheet'
+}), (req, res) => {
+    res.redirect('/index.html');
+});
+
+app.get('/auth/logout', (req, res) => {
+    req.logout(() => {
+        res.redirect('/index.html');
+    });
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`السيرفر يعمل بكفاءة على الرابط: http://localhost:${PORT}`);
+});

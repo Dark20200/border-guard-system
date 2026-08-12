@@ -1,0 +1,5 @@
+node_modules/
+.env
+dist/
+data/system/credentials.json
+data/system/users_status.json
