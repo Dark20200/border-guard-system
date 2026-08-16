@@ -12,16 +12,23 @@ const SPREADSHEET_ID = process.env.GOOGLE_SHEET_ID;
 const CREDENTIALS_PATH = path.join(__dirname, '..', 'data', 'system', 'credentials.json');
 
 // على Render (وأي استضافة سحابية) مفيش ملف credentials.json فعليًا (متعمد - الملف
-// ده حساس ومش بيترفع على GitHub). لازم تحط *محتوى* الملف كامل كمتغير بيئة اسمه
-// GOOGLE_SERVICE_ACCOUNT_JSON. على جهازك عندك محليًا، بيستخدم الملف عادي لو موجود.
+// ده حساس ومش بيترفع على GitHub). لازم تحط *محتوى* الملف كامل كمتغير بيئة.
+// أفضل طريقة: GOOGLE_SERVICE_ACCOUNT_BASE64 (نسخة Base64 من الملف - آمنة من أي
+// تقصيص أو غلط وقت اللصق لأنها حروف وأرقام بس من غير علامات تنصيص أو أسطر).
+// أو بديل: GOOGLE_SERVICE_ACCOUNT_JSON (نص الملف الخام - أكتر عرضة للتقصيص).
+// على جهازك محليًا، بيستخدم الملف عادي لو موجود.
 function getGoogleCredentials() {
+    if (process.env.GOOGLE_SERVICE_ACCOUNT_BASE64) {
+        const decoded = Buffer.from(process.env.GOOGLE_SERVICE_ACCOUNT_BASE64, 'base64').toString('utf8');
+        return JSON.parse(decoded);
+    }
     if (process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
         return JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
     }
     if (fs.existsSync(CREDENTIALS_PATH)) {
         return JSON.parse(fs.readFileSync(CREDENTIALS_PATH, 'utf8'));
     }
-    throw new Error('لازم تحدد GOOGLE_SERVICE_ACCOUNT_JSON في متغيرات البيئة أو تحط ملف data/system/credentials.json محليًا');
+    throw new Error('لازم تحدد GOOGLE_SERVICE_ACCOUNT_BASE64 في متغيرات البيئة أو تحط ملف data/system/credentials.json محليًا');
 }
 
 export async function getSheetData(range = 'A:Z') {
