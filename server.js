@@ -381,14 +381,14 @@ app.get('/auth/discord', (req, res, next) => {
 });
 
 app.get('/auth/discord/callback', passport.authenticate('discord', {
-    failureRedirect: '/index.html?error=not_in_sheet'
+    failureRedirect: '/?error=not_in_sheet'
 }), (req, res) => {
-    res.redirect('/index.html');
+    res.redirect('/');
 });
 
 app.get('/auth/logout', (req, res) => {
     req.logout(() => {
-        res.redirect('/index.html');
+        res.redirect('/');
     });
 });
 

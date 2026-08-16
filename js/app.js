@@ -129,7 +129,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     } else if (data.status === 'approved') {
       renderDashboard(data);
     } else {
-      window.location.href = '/index.html?error=pending_approval';
+      window.location.href = '/?error=pending_approval';
     }
   } catch (e) {
     console.error('خطأ:', e);
@@ -170,7 +170,7 @@ function renderDashboard(data) {
               ${ICONS.home}<span>الرئيسية</span>
             </button>
             <button onclick="switchTab('analyzer')" id="navAnalyzer" class="tab flex items-center gap-1.5 pb-3 -mb-3 text-sm focus-ring">
-              ${ICONS.file}<span>dashboard</span>
+              ${ICONS.file}<span>تحليل القرارات</span>
             </button>
             <button onclick="switchTab('archive')" id="navArchive" class="tab flex items-center gap-1.5 pb-3 -mb-3 text-sm focus-ring">
               ${ICONS.clock}<span>الأرشيف والسجلات</span>
@@ -272,7 +272,7 @@ function renderHomeSection(data) {
           <div onclick="switchTab('analyzer')" class="card p-5 cursor-pointer hover:border-blue-500/50 transition-all group flex flex-col justify-between">
             <div>
               <div class="w-10 h-10 rounded-lg bg-blue-500/10 text-blue-400 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">${ICONS.file}</div>
-              <h3 class="text-sm font-bold mb-1 text-[color:var(--text)]">dashboard</h3>
+              <h3 class="text-sm font-bold mb-1 text-[color:var(--text)]">تحليل القرارات</h3>
               <p class="text-xs text-[color:var(--muted)] leading-relaxed">استخراج البيانات التلقائي من نصوص قرارات الديسكورد باستخدام الذكاء الاصطناعي.</p>
             </div>
             <div class="mt-4 pt-3 border-t border-[color:var(--line)] text-xs text-blue-400 font-medium flex items-center justify-between">
