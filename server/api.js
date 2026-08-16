@@ -1,12 +1,7 @@
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import { Groq } from 'groq-sdk';
-import { getUsersDB, saveUsersDB, canManageAdmin, canModifyRecords, OWNER_DISCORD_ID } from './db.js';
+import { getUsersDB, saveUsersDB, canManageAdmin, OWNER_DISCORD_ID } from './db.js';
 import { getSheetData, getCharacterNameFromSheet, getRankFromSheet, getPermFromSheet } from './sheets.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import { getRecordsCollection } from './mongo.js';
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
@@ -24,7 +19,7 @@ export function setupApiRoutes(app) {
             return res.json({ loggedIn: false });
         }
 
-        const db = getUsersDB();
+        const db = await getUsersDB();
         const userId = req.user.id;
         const isOwner = userId === OWNER_DISCORD_ID;
         const status = isOwner ? 'approved' : (db[userId]?.status || 'pending');
@@ -41,7 +36,7 @@ export function setupApiRoutes(app) {
         db[userId].perm = sheetPerm !== undefined ? sheetPerm : '';
         if (sheetRpName) db[userId].rpName = sheetRpName;
         
-        saveUsersDB(db);
+        await saveUsersDB(db);
 
         res.json({
             loggedIn: true,
@@ -59,11 +54,11 @@ export function setupApiRoutes(app) {
     });
 
     app.get('/api/admin/requests', async (req, res) => {
-        if (!req.isAuthenticated() || !canManageAdmin(req.user.id)) {
+        if (!req.isAuthenticated() || !(await canManageAdmin(req.user.id))) {
             return res.status(403).json({ error: 'غير مصرح لك' });
         }
 
-        const db = getUsersDB();
+        const db = await getUsersDB();
         const currentUserId = req.user.id;
 
         let requests = await Promise.all(Object.keys(db).map(async (id) => {
@@ -90,14 +85,14 @@ export function setupApiRoutes(app) {
         res.json(requests);
     });
 
-    app.post('/api/admin/action', (req, res) => {
-        if (!req.isAuthenticated() || !canManageAdmin(req.user.id)) {
+    app.post('/api/admin/action', async (req, res) => {
+        if (!req.isAuthenticated() || !(await canManageAdmin(req.user.id))) {
             return res.status(403).json({ error: 'غير مصرح لك' });
         }
 
         const { userId, action, rank, perm } = req.body; 
         const currentUserId = req.user.id;
-        const db = getUsersDB();
+        const db = await getUsersDB();
 
         if (userId === OWNER_DISCORD_ID && currentUserId !== OWNER_DISCORD_ID) {
             return res.status(403).json({ error: 'لا يمكنك تعديل صلاحيات أو رتبة الأونر' });
@@ -108,7 +103,7 @@ export function setupApiRoutes(app) {
             if (rank !== undefined && rank !== null) db[userId].rank = rank;
             if (perm !== undefined && perm !== null) db[userId].perm = perm;
 
-            saveUsersDB(db);
+            await saveUsersDB(db);
             return res.json({ success: true });
         }
 
@@ -216,7 +211,7 @@ export function setupApiRoutes(app) {
         }
     });
 
-    app.post('/api/save-data', (req, res) => {
+    app.post('/api/save-data', async (req, res) => {
         if (!req.isAuthenticated()) {
             return res.status(403).json({ error: 'غير مصرح لك' });
         }
@@ -228,7 +223,6 @@ export function setupApiRoutes(app) {
             ? extraFields.filter(f => f && f.label && f.value).map(f => ({ label: String(f.label), value: String(f.value) }))
             : [];
 
-        const cleanOfficerId = officer.replace(/[^0-9]/g, '');
         const soldierIds = soldier.match(/\d+/g) || [];
 
         if (soldierIds.length === 0) {
@@ -237,35 +231,23 @@ export function setupApiRoutes(app) {
 
         try {
             const decisionType = penalty || type || 'عقوبة';
+            const col = await getRecordsCollection();
 
-            for (const cleanSoldierId of soldierIds) {
-                const soldierDir = path.join(__dirname, '..', 'data', 'soldiers', cleanSoldierId);
-                const typeDir = path.join(soldierDir, decisionType);
+            const docs = soldierIds.map(cleanSoldierId => ({
+                soldierId: cleanSoldierId,
+                soldier,
+                officer,
+                reason,
+                penalty: decisionType,
+                date: date || new Date().toLocaleDateString('ar-EG'),
+                type: decisionType,
+                extraFields: cleanExtraFields,
+                savedAt: new Date().toISOString(),
+                savedBy: req.user.username
+            }));
 
-                if (!fs.existsSync(soldierDir)) fs.mkdirSync(soldierDir, { recursive: true });
-                if (!fs.existsSync(typeDir)) fs.mkdirSync(typeDir, { recursive: true });
-
-                const fileName = `${cleanOfficerId}_${Date.now()}_${cleanSoldierId}.json`;
-                const filePath = path.join(typeDir, fileName);
-
-                if (fs.existsSync(filePath) && !canModifyRecords(req.user.id)) {
-                    return res.status(403).json({ error: 'ليس لديك صلاحية التعديل على السجلات' });
-                }
-
-                const decisionPayload = {
-                    soldier, 
-                    officer, 
-                    reason, 
-                    penalty: decisionType,
-                    date: date || new Date().toLocaleDateString('ar-EG'),
-                    type: decisionType,
-                    extraFields: cleanExtraFields,
-                    savedAt: new Date().toISOString(),
-                    savedBy: req.user.username
-                };
-
-                fs.writeFileSync(filePath, JSON.stringify(decisionPayload, null, 2));
-            }
+            // بيتحفظ سجل منفصل لكل عسكري مذكور، زي ما كان الحال بالظبط
+            await col.insertMany(docs);
 
             res.json({ success: true, message: 'تم حفظ القرار في أرشيف العسكريين بنجاح' });
         } catch (error) {

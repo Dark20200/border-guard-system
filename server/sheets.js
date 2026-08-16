@@ -1,4 +1,5 @@
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { google } from 'googleapis';
 import dotenv from 'dotenv';
@@ -8,11 +9,25 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const SPREADSHEET_ID = process.env.GOOGLE_SHEET_ID;
+const CREDENTIALS_PATH = path.join(__dirname, '..', 'data', 'system', 'credentials.json');
+
+// على Render (وأي استضافة سحابية) مفيش ملف credentials.json فعليًا (متعمد - الملف
+// ده حساس ومش بيترفع على GitHub). لازم تحط *محتوى* الملف كامل كمتغير بيئة اسمه
+// GOOGLE_SERVICE_ACCOUNT_JSON. على جهازك عندك محليًا، بيستخدم الملف عادي لو موجود.
+function getGoogleCredentials() {
+    if (process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
+        return JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
+    }
+    if (fs.existsSync(CREDENTIALS_PATH)) {
+        return JSON.parse(fs.readFileSync(CREDENTIALS_PATH, 'utf8'));
+    }
+    throw new Error('لازم تحدد GOOGLE_SERVICE_ACCOUNT_JSON في متغيرات البيئة أو تحط ملف data/system/credentials.json محليًا');
+}
 
 export async function getSheetData(range = 'A:Z') {
     try {
         const auth = new google.auth.GoogleAuth({
-            keyFile: path.join(__dirname, '..', 'data', 'system', 'credentials.json'),
+            credentials: getGoogleCredentials(),
             scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
         });
         const client = await auth.getClient();

@@ -1,5 +1,8 @@
 let currentExtractedData = {};
 const decisionTypes = ["الاستدعاء", "المكافأة", "الفصل", "قبول", "عقوبة", "تحذير", "إجازة", "استقالة", "تحديث اكواد", "تغير هوية"];
+
+// وصف كل حقل أساسي ثابت (id ثابت + قيمة مصدره في البيانات القادمة من السيرفر)
+// الحقول الإضافية (extraFields) بتتولد ديناميكيًا حسب نوع القرار وبيتم حقنها بينهم
 const BASE_FIELD_IDS = ['fieldOfficer', 'fieldSoldier', 'fieldReason', 'fieldPenalty', 'fieldDate', 'fieldTotalRecords'];
 
 function escapeAttr(str) {
@@ -33,7 +36,7 @@ function renderAnalyzerSection() {
       </div>
 
       <div class="lg:col-span-3 card p-5 flex flex-col">
-        <h2 class="text-sm font-bold mb-3">القرار</h2>
+        <h2 class="text-sm font-bold mb-3">نص رسالة الديسكورد</h2>
         <textarea id="messageInput" rows="11"
           class="w-full bg-[color:var(--panel-2)] border border-[color:var(--line)] rounded-md p-3 text-[color:var(--text)] focus:outline-none focus:border-[color:var(--accent)] transition placeholder-[color:var(--muted)] text-sm leading-relaxed focus-ring"
           placeholder="الصق نص القرار هنا..."></textarea>
@@ -83,6 +86,7 @@ function selectFieldRow(id, label, value, disabled = true) {
   `;
 }
 
+// يبني كل صفوف الحقول (الأساسية + الإضافية الديناميكية) على حسب نوع القرار المستخرج
 function renderResultFields(data, disabled = true) {
   const resultFields = document.getElementById('resultFields');
   if (!resultFields) return;

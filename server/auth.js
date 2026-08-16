@@ -10,7 +10,7 @@ export function setupAuth(passport) {
         scope: ['identify', 'guilds'],
         passReqToCallback: true
     }, async (req, accessToken, refreshToken, profile, done) => {
-        const db = getUsersDB();
+        const db = await getUsersDB();
         const characterName = await getCharacterNameFromSheet(profile.id);
         const sheetRank = await getRankFromSheet(profile.id); 
         const sheetPerm = await getPermFromSheet(profile.id); 
@@ -32,7 +32,7 @@ export function setupAuth(passport) {
                 db[profile.id].rank = sheetRank || 'قائد حرس الحدود';
                 db[profile.id].perm = sheetPerm !== undefined ? sheetPerm : (db[profile.id].perm || 'قاضي عسكري');
             }
-            saveUsersDB(db);
+            await saveUsersDB(db);
             return done(null, profile);
         }
 
@@ -59,7 +59,7 @@ export function setupAuth(passport) {
                 db[profile.id].status = 'approved';
             }
         }
-        saveUsersDB(db);
+        await saveUsersDB(db);
 
         return done(null, profile);
     }));

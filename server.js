@@ -6,13 +6,13 @@ import createMemoryStore from 'memorystore';
 import passport from 'passport';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import fs from 'fs';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 
 import { setupAuth } from './server/auth.js';
 import { setupApiRoutes } from './server/api.js';
 import { getSheetData, getCharacterNameFromSheet, getRankFromSheet } from './server/sheets.js';
+import { getRecordsCollection } from './server/mongo.js';
 
 dotenv.config();
 
@@ -22,19 +22,24 @@ const __dirname = path.dirname(__filename);
 const MemoryStore = createMemoryStore(session);
 const isProd = process.env.NODE_ENV === 'production';
 
+// ===================== إعدادات الحماية العامة =====================
+
+// SESSION_SECRET لازم ييجي من .env في بيئة الإنتاج - مفيش قيمة افتراضية ثابتة
 if (isProd && !process.env.SESSION_SECRET) {
     console.error('خطأ: لازم تحدد SESSION_SECRET في ملف .env قبل تشغيل السيرفر في وضع الإنتاج');
     process.exit(1);
 }
 
+// إخفاء هيدر X-Powered-By وإضافة هيدرز حماية قياسية (CSP, HSTS, ...الخ)
 app.use(helmet({
-    contentSecurityPolicy: false 
+    contentSecurityPolicy: false // فعّلها وشكّلها يدويًا لو عايز تتحكم بمصادر السكربتات/الصور بدقة
 }));
 
-app.set('trust proxy', 1);
+app.set('trust proxy', 1); // لو السيرفر شغال خلف Nginx / Cloudflare / أي بروكسي
 
+// تحديد عدد الطلبات لمنع الـ brute force و الـ scraping الآلي
 const generalLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
+    windowMs: 15 * 60 * 1000, // 15 دقيقة
     max: 300,
     standardHeaders: true,
     legacyHeaders: false,
@@ -54,6 +59,7 @@ app.use('/auth', authLimiter);
 
 app.use(express.json({ limit: '200kb' }));
 
+// حدد نطاق الموقع الحقيقي بتاعك في .env (CORS_ORIGIN=https://yourdomain.com)
 app.use(cors({
     origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
     credentials: true
@@ -65,7 +71,7 @@ app.use(session({
     saveUninitialized: false,
     store: new MemoryStore({ checkPeriod: 86400000 }),
     cookie: {
-        secure: isProd,
+        secure: isProd,       // لازم https في الإنتاج عشان الكوكي يتبعت
         httpOnly: true,
         sameSite: 'lax',
         maxAge: 24 * 60 * 60 * 1000
@@ -75,6 +81,10 @@ app.use(session({
 app.use(passport.initialize());
 app.use(passport.session());
 
+// ===================== حماية ملفات المشروع من الوصول المباشر =====================
+// المشكلة اللي كانت موجودة: express.static(__dirname) كان بيعرض كل ملفات المشروع
+// بما فيها data/soldiers (كل السجلات والبيانات الحساسة) و server.js و package.json و .env
+// أي حد يعرف الرابط كان يقدر يفتحها من المتصفح مباشرة من غير تسجيل دخول.
 const BLOCKED_PATHS = ['/data', '/server', '/.env', '/server.js', '/build.js', '/js', '/package.json', '/package-lock.json', '/node_modules', '/.git'];
 app.use((req, res, next) => {
     const p = req.path;
@@ -89,41 +99,26 @@ app.use(express.static(__dirname, { dotfiles: 'deny', index: 'index.html' }));
 setupAuth(passport);
 setupApiRoutes(app);
 
-function listDirs(p) {
-    if (!fs.existsSync(p)) return [];
-    return fs.readdirSync(p).filter(f => {
-        try { return fs.statSync(path.join(p, f)).isDirectory(); } catch { return false; }
-    });
-}
+// ===================== أدوات قراءة البيانات =====================
 
-function readAllRecords() {
-    const soldiersDir = path.join(__dirname, 'data', 'soldiers');
-    const records = [];
-
-    listDirs(soldiersDir).forEach(soldierId => {
-        const soldierPath = path.join(soldiersDir, soldierId);
-        listDirs(soldierPath).forEach(typeDir => {
-            const typePath = path.join(soldierPath, typeDir);
-            const files = fs.readdirSync(typePath).filter(f => f.endsWith('.json'));
-            files.forEach(file => {
-                try {
-                    const filePath = path.join(typePath, file);
-                    const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-                    records.push({ ...data, soldierId, typeFolder: typeDir, fileName: file });
-                } catch (err) {}
-            });
-        });
-    });
-
-    return records;
+// بترجع كل السجلات من قاعدة البيانات (بدل ما كانت بتتقرا من ملفات على القرص)
+async function readAllRecords() {
+    const col = await getRecordsCollection();
+    const docs = await col.find({}).toArray();
+    return docs.map(d => ({ ...d, typeFolder: d.type, fileName: String(d._id) }));
 }
 
 function recordTimestamp(rec) {
     return rec.savedAt ? new Date(rec.savedAt).getTime() : 0;
 }
 
+// ===================== ربط الأيدي بالاسم والكود من الشيت =====================
+// بدل ما الجدول يعرض رقم الأيدي الخام، بنجيب الاسم/الكود المسجلين في الشيت
+// ونحطهم بدل الرقم. النتيجة متخزنة مؤقتًا (كاش) دقيقة واحدة عشان منضربش الشيت
+// API على كل ريكوست.
+
 let sheetCache = { data: null, at: 0 };
-const SHEET_CACHE_TTL = 60 * 1000;
+const SHEET_CACHE_TTL = 60 * 1000; // دقيقة
 
 async function getSheetMap() {
     const now = Date.now();
@@ -157,12 +152,15 @@ function displayFor(id, sheetMap) {
     return { id, name: info.name, code: info.code || null, display };
 }
 
+// يحول نص فيه منشنات ديسكورد <@ID> لمصفوفة من الأشخاص (اسم + كود) باستخدام الشيت
 function resolveMentions(text, sheetMap) {
     if (!text) return [];
     const ids = [...String(text).matchAll(/<@!?(\d+)>/g)].map(m => m[1]);
     return ids.map(id => displayFor(id, sheetMap));
 }
 
+// يضيف لكل سجل: officerInfo (اسم/كود الضابط) و soldiersInfo (اسماء/اكواد العساكر)
+// و soldierIdInfo (اسم/كود صاحب السجل نفسه - ده اللي بيتعرض في عمود "العسكري" بالجدول)
 async function enrichRecords(records) {
     const sheetMap = await getSheetMap();
     return records.map(rec => {
@@ -181,10 +179,12 @@ async function enrichRecords(records) {
     });
 }
 
-app.get('/api/stats', (req, res) => {
+// ===================== الـ API =====================
+
+app.get('/api/stats', async (req, res) => {
     if (!req.isAuthenticated()) return res.status(403).json({ success: false, error: 'غير مصرح لك' });
     try {
-        const records = readAllRecords();
+        const records = await readAllRecords();
         const totalPenalties = records.length;
         const totalOffenders = new Set(records.map(r => r.soldierId)).size;
 
@@ -221,7 +221,7 @@ app.get('/api/search', async (req, res) => {
         const query = (req.query.q || '').trim().toLowerCase();
         if (!query) return res.json({ success: true, data: [] });
 
-        const matched = readAllRecords()
+        const matched = (await readAllRecords())
             .filter(rec => rec.soldierId.toLowerCase().includes(query) || JSON.stringify(rec).toLowerCase().includes(query))
             .sort((a, b) => recordTimestamp(b) - recordTimestamp(a));
 
@@ -237,7 +237,7 @@ app.get('/api/records', async (req, res) => {
     try {
         const { q = '', type = '', officer = '', soldier = '', dateFrom = '', dateTo = '', page = '1', limit = '10', sort = 'desc' } = req.query;
 
-        const all = readAllRecords();
+        const all = await readAllRecords();
         const types = [...new Set(all.map(r => r.type || r.typeFolder).filter(Boolean))];
 
         const qLower = q.trim().toLowerCase();
@@ -289,32 +289,22 @@ app.get('/api/soldiers', async (req, res) => {
     if (!req.isAuthenticated()) return res.status(403).json({ success: false, error: 'غير مصرح لك' });
     try {
         const { q = '', page = '1', limit = '12' } = req.query;
-        const soldiersDir = path.join(__dirname, 'data', 'soldiers');
 
-        let soldiers = listDirs(soldiersDir).map(id => {
-            const soldierPath = path.join(soldiersDir, id);
-            let totalRecords = 0;
-            let typesCount = {};
-            let lastSavedAt = null;
-
-            listDirs(soldierPath).forEach(typeDir => {
-                const typePath = path.join(soldierPath, typeDir);
-                const files = fs.readdirSync(typePath).filter(f => f.endsWith('.json'));
-                typesCount[typeDir] = files.length;
-                totalRecords += files.length;
-
-                files.forEach(file => {
-                    try {
-                        const data = JSON.parse(fs.readFileSync(path.join(typePath, file), 'utf8'));
-                        if (data.savedAt && (!lastSavedAt || new Date(data.savedAt) > new Date(lastSavedAt))) {
-                            lastSavedAt = data.savedAt;
-                        }
-                    } catch (err) {}
-                });
-            });
-
-            return { id, totalRecords, typesCount, lastSavedAt };
+        const allRecords = await readAllRecords();
+        const bySoldier = {};
+        allRecords.forEach(r => {
+            if (!r.soldierId) return;
+            if (!bySoldier[r.soldierId]) bySoldier[r.soldierId] = { id: r.soldierId, totalRecords: 0, typesCount: {}, lastSavedAt: null };
+            const s = bySoldier[r.soldierId];
+            s.totalRecords += 1;
+            const t = r.type || r.typeFolder || 'غير محدد';
+            s.typesCount[t] = (s.typesCount[t] || 0) + 1;
+            if (r.savedAt && (!s.lastSavedAt || new Date(r.savedAt) > new Date(s.lastSavedAt))) {
+                s.lastSavedAt = r.savedAt;
+            }
         });
+
+        let soldiers = Object.values(bySoldier);
 
         try {
             const sheetMap = await getSheetMap();
@@ -351,27 +341,24 @@ app.get('/api/soldiers/:id', async (req, res) => {
     if (!req.isAuthenticated()) return res.status(403).json({ success: false, error: 'غير مصرح لك' });
     try {
         const soldierId = req.params.id.replace(/[^0-9]/g, '');
-        const soldierPath = path.join(__dirname, 'data', 'soldiers', soldierId);
-
-        if (!soldierId || !fs.existsSync(soldierPath)) {
+        if (!soldierId) {
             return res.status(404).json({ success: false, message: 'لا توجد سجلات لهذا العسكري' });
         }
 
-        let records = [];
-        const typesCount = {};
+        const col = await getRecordsCollection();
+        const found = await col.find({ soldierId }).toArray();
 
-        listDirs(soldierPath).forEach(typeDir => {
-            const typePath = path.join(soldierPath, typeDir);
-            const files = fs.readdirSync(typePath).filter(f => f.endsWith('.json'));
-            typesCount[typeDir] = files.length;
-            files.forEach(file => {
-                try {
-                    const data = JSON.parse(fs.readFileSync(path.join(typePath, file), 'utf8'));
-                    records.push({ ...data, soldierId, typeFolder: typeDir });
-                } catch (err) {}
-            });
+        if (found.length === 0) {
+            return res.status(404).json({ success: false, message: 'لا توجد سجلات لهذا العسكري' });
+        }
+
+        const typesCount = {};
+        found.forEach(r => {
+            const t = r.type || 'غير محدد';
+            typesCount[t] = (typesCount[t] || 0) + 1;
         });
 
+        let records = found.map(r => ({ ...r, typeFolder: r.type }));
         records.sort((a, b) => recordTimestamp(b) - recordTimestamp(a));
         records = await enrichRecords(records);
 

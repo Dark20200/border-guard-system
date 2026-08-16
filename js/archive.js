@@ -1,3 +1,10 @@
+/* ==========================================================================
+   أرشيف العقوبات وسجلات الأعضاء
+   - تصفح كامل للسجلات مع فلاتر (النوع / الضابط / التاريخ) وصفحات
+   - دليل كامل بالأعضاء الذين لديهم سجلات
+   - ملف تفصيلي لكل عضو يعرض كامل تايم لاين قراراته
+  -------------------------------------------------------------------------- */
+
 const ARCHIVE_STATE = {
   tab: 'records',
   recordsPage: 1,
@@ -24,6 +31,9 @@ function cleanMention(val) {
   return digits || escapeHtml(val);
 }
 
+// الاسم والكود بيوصلوا جاهزين من السيرفر (بعد ما بيدورهم في شيت جوجل)
+// جوه rec.soldierIdInfo و rec.officerInfo. الدالة دي بس بتتعامل مع
+// الحالة اللي مفيش فيها تطابق في الشيت فترجع الآيدي الخام كبديل.
 function memberDisplay(info, rawId) {
   if (info && info.name) {
     return { label: info.name, code: info.code || '' };
@@ -63,6 +73,7 @@ function renderRecordCard(rec) {
   const soldierRaw = rec.soldierId || cleanMention(rec.soldier) || '';
   const officerRaw = cleanMention(rec.officer) || '';
 
+  // rec.soldierIdInfo و rec.officerInfo جايين جاهزين من السيرفر (الاسم والكود من شيت جوجل)
   const soldierInfo = memberDisplay(rec.soldierIdInfo, soldierRaw);
   const officerInfo = memberDisplay(rec.officerInfo, officerRaw);
 

@@ -1,39 +1,32 @@
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import { getUsersCollection } from './mongo.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const USERS_DB_PATH = path.join(__dirname, '..', 'data', 'system', 'users_status.json');
 const OWNER_DISCORD_ID = "450047099288027146";
 
-export function getUsersDB() {
-    const dataDir = path.join(__dirname, '..', 'data');
-    if (!fs.existsSync(dataDir)) {
-        fs.mkdirSync(dataDir, { recursive: true });
+// بترجع نفس الشكل القديم بالظبط: { userId: { status, rank, perm, ... }, ... }
+// عشان كل الكود اللي بيستخدمها من قبل يفضل شغال زي ما هو من غير تعديل كبير
+export async function getUsersDB() {
+    const col = await getUsersCollection();
+    const docs = await col.find({}).toArray();
+    const out = {};
+    for (const doc of docs) {
+        const { _id, ...rest } = doc;
+        out[_id] = rest;
     }
-    const systemDir = path.join(dataDir, 'system');
-    if (!fs.existsSync(systemDir)) {
-        fs.mkdirSync(systemDir, { recursive: true });
-    }
-    if (!fs.existsSync(USERS_DB_PATH)) {
-        fs.writeFileSync(USERS_DB_PATH, JSON.stringify({}));
-    }
-    return JSON.parse(fs.readFileSync(USERS_DB_PATH, 'utf8'));
+    return out;
 }
 
-export function saveUsersDB(data) {
-    const dataDir = path.join(__dirname, '..', 'data', 'system');
-    if (!fs.existsSync(dataDir)) {
-        fs.mkdirSync(dataDir, { recursive: true });
-    }
-    fs.writeFileSync(USERS_DB_PATH, JSON.stringify(data, null, 2));
+// بتاخد نفس الشكل القديم (object فيه كل المستخدمين) وتحفظه في قاعدة البيانات
+export async function saveUsersDB(data) {
+    const col = await getUsersCollection();
+    const ops = Object.entries(data).map(([id, val]) => ({
+        updateOne: { filter: { _id: id }, update: { $set: val }, upsert: true }
+    }));
+    if (ops.length) await col.bulkWrite(ops);
 }
 
-export function canManageAdmin(userId) {
+export async function canManageAdmin(userId) {
     if (userId === OWNER_DISCORD_ID) return true;
-    const db = getUsersDB();
+    const db = await getUsersDB();
     const rank = db[userId]?.rank;
     const perm = db[userId]?.perm;
     return db[userId]?.status === 'approved' && (
@@ -42,9 +35,9 @@ export function canManageAdmin(userId) {
     );
 }
 
-export function canModifyRecords(userId) {
+export async function canModifyRecords(userId) {
     if (userId === OWNER_DISCORD_ID) return true;
-    const db = getUsersDB();
+    const db = await getUsersDB();
     const rank = db[userId]?.rank;
     const perm = db[userId]?.perm;
     return db[userId]?.status === 'approved' && (
