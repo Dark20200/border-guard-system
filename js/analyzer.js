@@ -86,6 +86,30 @@ function selectFieldRow(id, label, value, disabled = true) {
   `;
 }
 
+function sheetUpdateBlock(sheetUpdate) {
+  const su = sheetUpdate && typeof sheetUpdate === 'object' ? sheetUpdate : { shouldUpdate: false, newName: null, newCode: null };
+  const checked = su.shouldUpdate ? 'checked' : '';
+  return `
+    <div data-field-row="sheetUpdateBlock" class="p-3 rounded border border-amber-500/30 bg-amber-500/5 space-y-2 sm:col-span-2">
+      <label class="flex items-center gap-2 cursor-pointer select-none">
+        <input type="checkbox" id="fieldSheetUpdateEnabled" ${checked} class="w-4 h-4 accent-amber-500" />
+        <span class="text-amber-400 font-semibold">تحديث اسم/كود العسكري في جدول جوجل شيت</span>
+      </label>
+      <p class="text-[10px] text-[color:var(--muted)]">الذكاء الاصطناعي ${su.shouldUpdate ? 'رصد تغيير في الاسم/الكود بالنص' : 'مالقاش تغيير اسم/كود واضح بالنص'} - راجع وعدّل قبل الحفظ لو محتاج.</p>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <div>
+          <span class="text-[color:var(--muted)] block mb-1 text-[11px]">الاسم الجديد:</span>
+          <input type="text" id="fieldSheetNewName" value="${escapeAttr(su.newName || '')}" class="w-full bg-[color:var(--panel-2)] border border-[color:var(--line)] rounded p-2 text-[color:var(--text)] focus:outline-none focus:border-[color:var(--accent)]" />
+        </div>
+        <div>
+          <span class="text-[color:var(--muted)] block mb-1 text-[11px]">الكود الجديد:</span>
+          <input type="text" id="fieldSheetNewCode" value="${escapeAttr(su.newCode || '')}" class="w-full bg-[color:var(--panel-2)] border border-[color:var(--line)] rounded p-2 text-[color:var(--text)] focus:outline-none focus:border-[color:var(--accent)]" />
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 // يبني كل صفوف الحقول (الأساسية + الإضافية الديناميكية) على حسب نوع القرار المستخرج
 function renderResultFields(data, disabled = true) {
   const resultFields = document.getElementById('resultFields');
@@ -100,7 +124,8 @@ function renderResultFields(data, disabled = true) {
     selectFieldRow('fieldPenalty', 'نوع القرار:', data.penalty, disabled),
     ...extra.map((f, i) => textFieldRow(`extraField_${i}`, `${f.label}:`, f.value, disabled)),
     textFieldRow('fieldDate', 'التاريخ:', data.date, disabled),
-    textFieldRow('fieldTotalRecords', data.recordsLabel || 'إجمالي السجلات:', data.totalRecords, disabled)
+    textFieldRow('fieldTotalRecords', data.recordsLabel || 'إجمالي السجلات:', data.totalRecords, disabled),
+    sheetUpdateBlock(data.sheetUpdate)
   ].join('');
 
   resultFields.innerHTML = html;
@@ -194,7 +219,10 @@ async function analyzeMessage() {
       date: finalDate,
       totalRecords: extracted.totalRecords || extracted.fieldTotalRecords || '1',
       recordsLabel: extracted.recordsLabel || 'إجمالي السجلات:',
-      extraFields: Array.isArray(extracted.extraFields) ? extracted.extraFields : []
+      extraFields: Array.isArray(extracted.extraFields) ? extracted.extraFields : [],
+      sheetUpdate: extracted.sheetUpdate && typeof extracted.sheetUpdate === 'object'
+        ? extracted.sheetUpdate
+        : { shouldUpdate: false, newName: null, newCode: null }
     };
 
     renderResultFields(currentExtractedData, true);
@@ -265,6 +293,13 @@ async function saveEditedData() {
     value: document.getElementById(`extraField_${i}`)?.value || ''
   }));
 
+  const sheetUpdateEnabled = document.getElementById('fieldSheetUpdateEnabled')?.checked || false;
+  const sheetUpdate = {
+    shouldUpdate: sheetUpdateEnabled,
+    newName: document.getElementById('fieldSheetNewName')?.value || null,
+    newCode: document.getElementById('fieldSheetNewCode')?.value || null
+  };
+
   const updatedData = {
     officer: document.getElementById('fieldOfficer')?.value || '',
     soldier: document.getElementById('fieldSoldier')?.value || '',
@@ -274,7 +309,8 @@ async function saveEditedData() {
     date: document.getElementById('fieldDate')?.value || '',
     totalRecords: document.getElementById('fieldTotalRecords')?.value || '',
     recordsLabel: currentExtractedData.recordsLabel,
-    extraFields: updatedExtraFields
+    extraFields: updatedExtraFields,
+    sheetUpdate
   };
 
   try {
@@ -286,12 +322,17 @@ async function saveEditedData() {
     });
 
     if (!response.ok) throw new Error('فشل حفظ البيانات في السيرفر');
+    const resJson = await response.json();
 
     currentExtractedData = updatedData;
     renderResultFields(currentExtractedData, true);
     if (editBtn) editBtn.textContent = 'Edit';
 
-    toast('تم حفظ وإرسال القرار في الملف بنجاح!', 'success');
+    if (resJson.warning) {
+      toast(resJson.warning, 'error');
+    } else {
+      toast('تم حفظ وإرسال القرار في الملف بنجاح!', 'success');
+    }
   } catch (error) {
     console.error(error);
     toast('حدث خطأ أثناء الحفظ', 'error');

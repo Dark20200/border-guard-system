@@ -1,6 +1,6 @@
 import { Groq } from 'groq-sdk';
 import { getUsersDB, saveUsersDB, canManageAdmin, OWNER_DISCORD_ID } from './db.js';
-import { getSheetData, getCharacterNameFromSheet, getRankFromSheet, getPermFromSheet } from './sheets.js';
+import { getSheetData, getCharacterNameFromSheet, getRankFromSheet, getPermFromSheet, updateCharacterNameInSheet } from './sheets.js';
 import { getRecordsCollection } from './mongo.js';
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
@@ -155,6 +155,12 @@ export function setupApiRoutes(app) {
 
 لا تخترع بيانات غير موجودة في النص أبدًا. لو حقل مش موجود في النص خالص، سيبه ولا تضيفه لـ extraFields.
 
+**الخطوة 4 - تحديد تحديث الشيت (sheetUpdate):**
+بغض النظر عن نوع القرار، افحص النص وحدد: هل فيه تغيير فعلي في **اسم** العسكري أو **كوده** المسجل في الجدول الرسمي؟ ده ممكن يحصل مع أي نوع قرار مش بس "تغير هوية" أو "تحديث اكواد" (مثلاً قرار قبول بيدي اسم جديد للمجند، أو قرار عقوبة بيغيّر كود كعقوبة إضافية). 
+- لو النص فعلاً بيذكر اسم جديد أو كود جديد محدد وواضح للعسكري، رجّع "shouldUpdate": true مع القيم.
+- لو مفيش تغيير اسم/كود واضح ومباشر في النص (الحالة الشائعة في معظم القرارات)، رجّع "shouldUpdate": false.
+- لا تخمّن أو تفترض قيم غير مذكورة صراحة في النص.
+
 أرجع النتيجة حصراً بتنسيق JSON بالمفاتيح التالية، بدون أي نص إضافي قبلها أو بعدها:
 {
   "decisionType": "...",
@@ -165,7 +171,8 @@ export function setupApiRoutes(app) {
   "date": "...",
   "totalRecords": "...",
   "recordsLabel": "...",
-  "extraFields": [ { "label": "...", "value": "..." } ]
+  "extraFields": [ { "label": "...", "value": "..." } ],
+  "sheetUpdate": { "shouldUpdate": false, "newName": null, "newCode": null }
 }`
                     },
                     { role: "user", content: message }
@@ -191,6 +198,13 @@ export function setupApiRoutes(app) {
                     .map(f => ({ label: String(f.label), value: String(f.value) }))
                 : [];
 
+            const rawSheetUpdate = extractedData.sheetUpdate || {};
+            const sheetUpdate = {
+                shouldUpdate: Boolean(rawSheetUpdate.shouldUpdate) && (Boolean(rawSheetUpdate.newName) || Boolean(rawSheetUpdate.newCode)),
+                newName: rawSheetUpdate.newName ? String(rawSheetUpdate.newName).trim() : null,
+                newCode: rawSheetUpdate.newCode ? String(rawSheetUpdate.newCode).trim() : null
+            };
+
             const formattedData = {
                 officer: extractedData.officer || extractedData.fieldOfficer || 'غير محدد',
                 soldier: extractedData.soldier || extractedData.fieldSoldier || 'غير محدد',
@@ -201,7 +215,8 @@ export function setupApiRoutes(app) {
                 date: finalDate,
                 totalRecords: extractedData.totalRecords || extractedData.fieldTotalRecords || '1',
                 recordsLabel: extractedData.recordsLabel || 'إجمالي السجلات:',
-                extraFields
+                extraFields,
+                sheetUpdate
             };
 
             res.json({ success: true, data: formattedData });
@@ -216,7 +231,7 @@ export function setupApiRoutes(app) {
             return res.status(403).json({ error: 'غير مصرح لك' });
         }
 
-        const { soldier, officer, reason, penalty, date, type, extraFields } = req.body;
+        const { soldier, officer, reason, penalty, date, type, extraFields, sheetUpdate } = req.body;
         if (!soldier || !officer) return res.status(400).json({ error: 'بيانات العسكري أو الضابط مفقودة' });
 
         const cleanExtraFields = Array.isArray(extraFields)
@@ -249,7 +264,34 @@ export function setupApiRoutes(app) {
             // بيتحفظ سجل منفصل لكل عسكري مذكور، زي ما كان الحال بالظبط
             await col.insertMany(docs);
 
-            res.json({ success: true, message: 'تم حفظ القرار في أرشيف العسكريين بنجاح' });
+            // كل قرار بيعدي على الذكاء الاصطناعي أولًا (في /api/analyze)، وهو اللي
+            // بيقرر لو فيه اسم/كود جديد فعلي مذكور في النص - مش بس لأنواع قرارات
+            // محددة. لو الواجهة بعتت sheetUpdate.shouldUpdate=true، نحدّث الشيت.
+            let newName = sheetUpdate?.shouldUpdate ? sheetUpdate.newName : null;
+            let newCode = sheetUpdate?.shouldUpdate ? sheetUpdate.newCode : null;
+
+            // احتياط: لو الواجهة القديمة بعتت بيانات من غير sheetUpdate، نرجع
+            // للطريقة القديمة (البحث عن حقول "الاسم الجديد"/"الكود الجديد")
+            if (!newName && !newCode) {
+                const newNameField = cleanExtraFields.find(f => f.label.includes('الاسم الجديد'));
+                const newCodeField = cleanExtraFields.find(f => f.label.includes('الكود الجديد'));
+                if (newNameField?.value) {
+                    newName = newNameField.value;
+                    newCode = newCodeField?.value || null;
+                }
+            }
+
+            let sheetUpdateWarning = null;
+            if (newName || newCode) {
+                const results = await Promise.all(
+                    soldierIds.map(id => updateCharacterNameInSheet(id, newName, newCode))
+                );
+                if (results.some(ok => !ok)) {
+                    sheetUpdateWarning = 'تم حفظ القرار، لكن تعذر تحديث الاسم/الكود في شيت جوجل لبعض العساكر (تأكد إنهم موجودين في الشيت أصلاً)';
+                }
+            }
+
+            res.json({ success: true, message: 'تم حفظ القرار في أرشيف العسكريين بنجاح', warning: sheetUpdateWarning });
         } catch (error) {
             console.error("خطأ في حفظ القرار:", error);
             res.status(500).json({ success: false, error: 'فشل حفظ القرار في النظام' });

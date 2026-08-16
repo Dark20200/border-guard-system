@@ -31,19 +31,25 @@ function getGoogleCredentials() {
     throw new Error('لازم تحدد GOOGLE_SERVICE_ACCOUNT_BASE64 في متغيرات البيئة أو تحط ملف data/system/credentials.json محليًا');
 }
 
+async function getSheetsClient() {
+    const auth = new google.auth.GoogleAuth({
+        credentials: getGoogleCredentials(),
+        // Read + Write - محتاجين الكتابة عشان نقدر نحدّث الاسم في الشيت من الموقع
+        scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+    });
+    const client = await auth.getClient();
+    return google.sheets({ version: 'v4', auth: client });
+}
+
+async function getSheetName(googleSheets) {
+    const meta = await googleSheets.spreadsheets.get({ spreadsheetId: SPREADSHEET_ID });
+    return meta.data.sheets[0].properties.title;
+}
+
 export async function getSheetData(range = 'A:Z') {
     try {
-        const auth = new google.auth.GoogleAuth({
-            credentials: getGoogleCredentials(),
-            scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
-        });
-        const client = await auth.getClient();
-        const googleSheets = google.sheets({ version: 'v4', auth: client });
-
-        const meta = await googleSheets.spreadsheets.get({
-            spreadsheetId: SPREADSHEET_ID,
-        });
-        const sheetName = meta.data.sheets[0].properties.title;
+        const googleSheets = await getSheetsClient();
+        const sheetName = await getSheetName(googleSheets);
 
         const response = await googleSheets.spreadsheets.values.get({
             spreadsheetId: SPREADSHEET_ID,
@@ -53,6 +59,50 @@ export async function getSheetData(range = 'A:Z') {
     } catch (error) {
         console.error("خطأ في جلب بيانات جوجل شيت:", error.message);
         return [];
+    }
+}
+
+// بتدور على رقم الصف بتاع عسكري معين في الشيت (عشان نقدر نحدّث خلاياه)
+// بترجع null لو مالقتوش
+async function findRowNumberByDiscordId(discordId) {
+    const rows = await getSheetData('A:A');
+    const cleanTargetId = String(discordId).replace(/[^0-9]/g, '');
+    for (let i = 0; i < rows.length; i++) {
+        const cleanSheetId = rows[i][0] ? String(rows[i][0]).replace(/[^0-9]/g, '') : '';
+        if (cleanSheetId && cleanSheetId === cleanTargetId) {
+            return i + 1; // أرقام صفوف الشيت بتبدأ من 1 مش 0
+        }
+    }
+    return null;
+}
+
+// بتحدّث اسم (وكود لو اتبعت) العسكري في عمودي C و D في الشيت مباشرة.
+// بتترجع true لو نجحت، false لو العسكري مش موجود في الشيت أو حصل خطأ.
+export async function updateCharacterNameInSheet(discordId, newName, newCode = null) {
+    try {
+        const rowNumber = await findRowNumberByDiscordId(discordId);
+        if (!rowNumber) {
+            console.error(`تحديث الاسم فشل: العسكري ${discordId} مش موجود في الشيت`);
+            return false;
+        }
+
+        const googleSheets = await getSheetsClient();
+        const sheetName = await getSheetName(googleSheets);
+
+        const data = [{ range: `${sheetName}!C${rowNumber}`, values: [[newName]] }];
+        if (newCode !== null && newCode !== undefined && newCode !== '') {
+            data.push({ range: `${sheetName}!D${rowNumber}`, values: [[newCode]] });
+        }
+
+        await googleSheets.spreadsheets.values.batchUpdate({
+            spreadsheetId: SPREADSHEET_ID,
+            requestBody: { valueInputOption: 'USER_ENTERED', data }
+        });
+
+        return true;
+    } catch (error) {
+        console.error("خطأ أثناء تحديث الاسم في الشيت:", error.message);
+        return false;
     }
 }
 
