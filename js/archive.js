@@ -1,10 +1,3 @@
-/* ==========================================================================
-   أرشيف العقوبات وسجلات الأعضاء
-   - تصفح كامل للسجلات مع فلاتر (النوع / الضابط / التاريخ) وصفحات
-   - دليل كامل بالأعضاء الذين لديهم سجلات
-   - ملف تفصيلي لكل عضو يعرض كامل تايم لاين قراراته
-  -------------------------------------------------------------------------- */
-
 const ARCHIVE_STATE = {
   tab: 'records',
   recordsPage: 1,
@@ -14,7 +7,6 @@ const ARCHIVE_STATE = {
   filters: { q: '', type: '', officer: '', dateFrom: '', dateTo: '' }
 };
 
-/* ---------------- Helpers ---------------- */
 function escapeHtml(str) {
   if (str === null || str === undefined) return '';
   return String(str)
@@ -31,9 +23,6 @@ function cleanMention(val) {
   return digits || escapeHtml(val);
 }
 
-// الاسم والكود بيوصلوا جاهزين من السيرفر (بعد ما بيدورهم في شيت جوجل)
-// جوه rec.soldierIdInfo و rec.officerInfo. الدالة دي بس بتتعامل مع
-// الحالة اللي مفيش فيها تطابق في الشيت فترجع الآيدي الخام كبديل.
 function memberDisplay(info, rawId) {
   if (info && info.name) {
     return { label: info.name, code: info.code || '' };
@@ -73,7 +62,6 @@ function renderRecordCard(rec) {
   const soldierRaw = rec.soldierId || cleanMention(rec.soldier) || '';
   const officerRaw = cleanMention(rec.officer) || '';
 
-  // rec.soldierIdInfo و rec.officerInfo جايين جاهزين من السيرفر (الاسم والكود من شيت جوجل)
   const soldierInfo = memberDisplay(rec.soldierIdInfo, soldierRaw);
   const officerInfo = memberDisplay(rec.officerInfo, officerRaw);
 
@@ -112,7 +100,6 @@ function renderRecordCard(rec) {
   `;
 }
 
-/* ---------------- Section Shell ---------------- */
 function renderArchiveSection() {
   const archiveSec = document.getElementById('archiveSection');
   if (!archiveSec) return;
@@ -184,7 +171,6 @@ function renderArchiveSection() {
   loadArchiveRecords();
 }
 
-/* ---------------- Tabs & Filters ---------------- */
 function switchArchiveTab(tab) {
   ARCHIVE_STATE.tab = tab;
   const isRecords = tab === 'records';
@@ -241,7 +227,6 @@ function populateTypeFilterOptions(types) {
   select.value = current || '';
 }
 
-/* ---------------- Stats ---------------- */
 async function fetchArchiveStats() {
   try {
     const response = await fetch('/api/stats', { method: 'GET', credentials: 'include' });
@@ -257,7 +242,6 @@ async function fetchArchiveStats() {
   }
 }
 
-/* ---------------- Records Tab ---------------- */
 function changeArchivePageRecords(delta) {
   ARCHIVE_STATE.recordsPage = Math.max(1, ARCHIVE_STATE.recordsPage + delta);
   loadArchiveRecords();
@@ -320,7 +304,6 @@ async function loadArchiveRecords() {
   }
 }
 
-/* ---------------- Members Tab ---------------- */
 function changeArchivePageMembers(delta) {
   ARCHIVE_STATE.membersPage = Math.max(1, ARCHIVE_STATE.membersPage + delta);
   loadArchiveMembers();
@@ -379,7 +362,6 @@ async function loadArchiveMembers() {
   }
 }
 
-/* ---------------- Member Profile Modal ---------------- */
 async function openSoldierProfile(id) {
   const cleanId = String(id).replace(/[^0-9]/g, '');
   const host = document.getElementById('soldierModalHost');

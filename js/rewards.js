@@ -1,5 +1,3 @@
-/* ---------------- وحدة تحكم المستحقات ---------------- */
-
 let REWARDS_STATE = {
   isOpen: false,
   allRewards: [],
@@ -17,7 +15,7 @@ function renderRewardsSection() {
       <div class="flex items-center justify-between border-b border-[color:var(--line)] pb-3 flex-wrap gap-2">
         <div>
           <h2 class="text-sm font-bold text-white">وحدة تحكم المستحقات</h2>
-          <p class="text-[11px] text-[color:var(--muted)] mt-0.5">المكافآت اللي عدّى عليها 4 أيام من غير تسليم بتتحول تلقائيًا لـ Expired.</p>
+          <p class="text-[11px] text-[color:var(--muted)] mt-0.5">قائمه عرض المستحقات و لوحة تحكم خاصة بها.</p>
         </div>
         <button onclick="toggleDuesDoor()" id="doorToggleBtn" class="btn py-2 px-4 text-xs flex items-center gap-2 focus-ring">
           ${ICONS.gift}<span id="doorToggleLabel">...</span>
@@ -83,7 +81,6 @@ async function toggleDuesDoor() {
   }
 }
 
-/* ---------------- عرض المكافآت (الباب مفتوح) ---------------- */
 
 async function loadRewardsList() {
   const body = document.getElementById('rewardsPanelBody');
@@ -226,8 +223,6 @@ async function markRewardDelivered(id, btn) {
     if (btn) { btn.disabled = false; btn.textContent = 'تم التسليم'; }
   }
 }
-
-/* ---------------- سجل فتح/غلق الباب (الباب مقفول) ---------------- */
 
 let DOOR_HISTORY_DATA = [];
 

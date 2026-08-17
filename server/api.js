@@ -6,7 +6,6 @@ import { getRecordsCollection, getDoorSessionsCollection } from './mongo.js';
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-// كاش بسيط لأسماء/أكواد الشيت خاص بلوحة المستحقات (دقيقة واحدة)
 let rewardsSheetCache = { data: null, at: 0 };
 async function getRewardsSheetMap() {
     const now = Date.now();
@@ -286,17 +285,11 @@ export function setupApiRoutes(app) {
                 savedBy: req.user.username
             }));
 
-            // بيتحفظ سجل منفصل لكل عسكري مذكور، زي ما كان الحال بالظبط
             await col.insertMany(docs);
 
-            // كل قرار بيعدي على الذكاء الاصطناعي أولًا (في /api/analyze)، وهو اللي
-            // بيقرر لو فيه اسم/كود جديد فعلي مذكور في النص - مش بس لأنواع قرارات
-            // محددة. لو الواجهة بعتت sheetUpdate.shouldUpdate=true، نحدّث الشيت.
             let newName = sheetUpdate?.shouldUpdate ? sheetUpdate.newName : null;
             let newCode = sheetUpdate?.shouldUpdate ? sheetUpdate.newCode : null;
 
-            // احتياط: لو الواجهة القديمة بعتت بيانات من غير sheetUpdate، نرجع
-            // للطريقة القديمة (البحث عن حقول "الاسم الجديد"/"الكود الجديد")
             if (!newName && !newCode) {
                 const newNameField = cleanExtraFields.find(f => f.label.includes('الاسم الجديد'));
                 const newCodeField = cleanExtraFields.find(f => f.label.includes('الكود الجديد'));
@@ -323,10 +316,8 @@ export function setupApiRoutes(app) {
         }
     });
 
-    // ===================== وحدة تحكم المستحقات (المكافآت) =====================
     const FOUR_DAYS_MS = 4 * 24 * 60 * 60 * 1000;
 
-    // "فتح باب المستحقات": بيجيب كل سجلات المكافآت بس (type = المكافأة)
     app.get('/api/rewards', async (req, res) => {
         if (!req.isAuthenticated() || !(await canManageAdmin(req.user.id))) {
             return res.status(403).json({ error: 'غير مصرح لك' });
@@ -376,7 +367,6 @@ export function setupApiRoutes(app) {
         }
     });
 
-    // تسجيل تسليم مكافأة معينة (بتفضل ظاهرة بعلامة "تم التسليم" بدل الزرار)
     app.post('/api/rewards/:id/deliver', async (req, res) => {
         if (!req.isAuthenticated() || !(await canManageAdmin(req.user.id))) {
             return res.status(403).json({ error: 'غير مصرح لك' });
@@ -397,7 +387,6 @@ export function setupApiRoutes(app) {
         }
     });
 
-    // حالة الباب: مفتوح لو فيه سيشن مسجل بدون تاريخ إغلاق
     app.get('/api/rewards/door-status', async (req, res) => {
         if (!req.isAuthenticated() || !(await canManageAdmin(req.user.id))) {
             return res.status(403).json({ error: 'غير مصرح لك' });
@@ -421,7 +410,6 @@ export function setupApiRoutes(app) {
         }
     });
 
-    // فتح باب المستحقات (بيتقفل تلقائيًا أي جلسة قديمة متفتوحة غلط لو موجودة)
     app.post('/api/rewards/door/open', async (req, res) => {
         if (!req.isAuthenticated() || !(await canManageAdmin(req.user.id))) {
             return res.status(403).json({ error: 'غير مصرح لك' });
@@ -451,7 +439,6 @@ export function setupApiRoutes(app) {
         }
     });
 
-    // غلق باب المستحقات
     app.post('/api/rewards/door/close', async (req, res) => {
         if (!req.isAuthenticated() || !(await canManageAdmin(req.user.id))) {
             return res.status(403).json({ error: 'غير مصرح لك' });
@@ -472,7 +459,6 @@ export function setupApiRoutes(app) {
         }
     });
 
-    // سجل كل مرات فتح/غلق الباب (بيظهر لما الباب يكون مقفول)
     app.get('/api/rewards/door-history', async (req, res) => {
         if (!req.isAuthenticated() || !(await canManageAdmin(req.user.id))) {
             return res.status(403).json({ error: 'غير مصرح لك' });

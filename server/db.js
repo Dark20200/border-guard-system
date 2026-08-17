@@ -2,8 +2,6 @@ import { getUsersCollection } from './mongo.js';
 
 const OWNER_DISCORD_ID = "450047099288027146";
 
-// بترجع نفس الشكل القديم بالظبط: { userId: { status, rank, perm, ... }, ... }
-// عشان كل الكود اللي بيستخدمها من قبل يفضل شغال زي ما هو من غير تعديل كبير
 export async function getUsersDB() {
     const col = await getUsersCollection();
     const docs = await col.find({}).toArray();
@@ -15,7 +13,6 @@ export async function getUsersDB() {
     return out;
 }
 
-// بتاخد نفس الشكل القديم (object فيه كل المستخدمين) وتحفظه في قاعدة البيانات
 export async function saveUsersDB(data) {
     const col = await getUsersCollection();
     const ops = Object.entries(data).map(([id, val]) => ({

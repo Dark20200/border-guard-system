@@ -22,24 +22,19 @@ const __dirname = path.dirname(__filename);
 const MemoryStore = createMemoryStore(session);
 const isProd = process.env.NODE_ENV === 'production';
 
-// ===================== إعدادات الحماية العامة =====================
-
-// SESSION_SECRET لازم ييجي من .env في بيئة الإنتاج - مفيش قيمة افتراضية ثابتة
 if (isProd && !process.env.SESSION_SECRET) {
     console.error('خطأ: لازم تحدد SESSION_SECRET في ملف .env قبل تشغيل السيرفر في وضع الإنتاج');
     process.exit(1);
 }
 
-// إخفاء هيدر X-Powered-By وإضافة هيدرز حماية قياسية (CSP, HSTS, ...الخ)
 app.use(helmet({
-    contentSecurityPolicy: false // فعّلها وشكّلها يدويًا لو عايز تتحكم بمصادر السكربتات/الصور بدقة
+    contentSecurityPolicy: false 
 }));
 
-app.set('trust proxy', 1); // لو السيرفر شغال خلف Nginx / Cloudflare / أي بروكسي
+app.set('trust proxy', 1);
 
-// تحديد عدد الطلبات لمنع الـ brute force و الـ scraping الآلي
 const generalLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 دقيقة
+    windowMs: 15 * 60 * 1000,
     max: 300,
     standardHeaders: true,
     legacyHeaders: false,
@@ -59,7 +54,6 @@ app.use('/auth', authLimiter);
 
 app.use(express.json({ limit: '200kb' }));
 
-// حدد نطاق الموقع الحقيقي بتاعك في .env (CORS_ORIGIN=https://yourdomain.com)
 app.use(cors({
     origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
     credentials: true
@@ -71,7 +65,7 @@ app.use(session({
     saveUninitialized: false,
     store: new MemoryStore({ checkPeriod: 86400000 }),
     cookie: {
-        secure: isProd,       // لازم https في الإنتاج عشان الكوكي يتبعت
+        secure: isProd,
         httpOnly: true,
         sameSite: 'lax',
         maxAge: 24 * 60 * 60 * 1000
@@ -81,10 +75,6 @@ app.use(session({
 app.use(passport.initialize());
 app.use(passport.session());
 
-// ===================== حماية ملفات المشروع من الوصول المباشر =====================
-// المشكلة اللي كانت موجودة: express.static(__dirname) كان بيعرض كل ملفات المشروع
-// بما فيها data/soldiers (كل السجلات والبيانات الحساسة) و server.js و package.json و .env
-// أي حد يعرف الرابط كان يقدر يفتحها من المتصفح مباشرة من غير تسجيل دخول.
 const BLOCKED_PATHS = ['/data', '/server', '/.env', '/server.js', '/build.js', '/js', '/package.json', '/package-lock.json', '/node_modules', '/.git'];
 app.use((req, res, next) => {
     const p = req.path;
@@ -99,9 +89,6 @@ app.use(express.static(__dirname, { dotfiles: 'deny', index: 'index.html' }));
 setupAuth(passport);
 setupApiRoutes(app);
 
-// ===================== أدوات قراءة البيانات =====================
-
-// بترجع كل السجلات من قاعدة البيانات (بدل ما كانت بتتقرا من ملفات على القرص)
 async function readAllRecords() {
     const col = await getRecordsCollection();
     const docs = await col.find({}).toArray();
@@ -112,13 +99,8 @@ function recordTimestamp(rec) {
     return rec.savedAt ? new Date(rec.savedAt).getTime() : 0;
 }
 
-// ===================== ربط الأيدي بالاسم والكود من الشيت =====================
-// بدل ما الجدول يعرض رقم الأيدي الخام، بنجيب الاسم/الكود المسجلين في الشيت
-// ونحطهم بدل الرقم. النتيجة متخزنة مؤقتًا (كاش) دقيقة واحدة عشان منضربش الشيت
-// API على كل ريكوست.
-
 let sheetCache = { data: null, at: 0 };
-const SHEET_CACHE_TTL = 60 * 1000; // دقيقة
+const SHEET_CACHE_TTL = 60 * 1000;
 
 async function getSheetMap() {
     const now = Date.now();
@@ -152,15 +134,12 @@ function displayFor(id, sheetMap) {
     return { id, name: info.name, code: info.code || null, display };
 }
 
-// يحول نص فيه منشنات ديسكورد <@ID> لمصفوفة من الأشخاص (اسم + كود) باستخدام الشيت
 function resolveMentions(text, sheetMap) {
     if (!text) return [];
     const ids = [...String(text).matchAll(/<@!?(\d+)>/g)].map(m => m[1]);
     return ids.map(id => displayFor(id, sheetMap));
 }
 
-// يضيف لكل سجل: officerInfo (اسم/كود الضابط) و soldiersInfo (اسماء/اكواد العساكر)
-// و soldierIdInfo (اسم/كود صاحب السجل نفسه - ده اللي بيتعرض في عمود "العسكري" بالجدول)
 async function enrichRecords(records) {
     const sheetMap = await getSheetMap();
     return records.map(rec => {
@@ -178,8 +157,6 @@ async function enrichRecords(records) {
         };
     });
 }
-
-// ===================== الـ API =====================
 
 app.get('/api/stats', async (req, res) => {
     if (!req.isAuthenticated()) return res.status(403).json({ success: false, error: 'غير مصرح لك' });

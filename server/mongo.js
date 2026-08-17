@@ -1,7 +1,5 @@
 import { MongoClient } from 'mongodb';
 
-// اتصال واحد بس بقاعدة البيانات بيتعاد استخدامه في كل الطلبات
-// (مش بنفتح اتصال جديد كل مرة - ده بيبطئ الموقع)
 let clientPromise = null;
 
 async function getClient() {

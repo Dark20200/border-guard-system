@@ -1,8 +1,6 @@
 let currentExtractedData = {};
 const decisionTypes = ["الاستدعاء", "المكافأة", "الفصل", "قبول", "عقوبة", "تحذير", "إجازة", "استقالة", "تحديث اكواد", "تغير هوية"];
 
-// وصف كل حقل أساسي ثابت (id ثابت + قيمة مصدره في البيانات القادمة من السيرفر)
-// الحقول الإضافية (extraFields) بتتولد ديناميكيًا حسب نوع القرار وبيتم حقنها بينهم
 const BASE_FIELD_IDS = ['fieldOfficer', 'fieldSoldier', 'fieldReason', 'fieldPenalty', 'fieldDate', 'fieldTotalRecords'];
 
 function escapeAttr(str) {
@@ -110,7 +108,6 @@ function sheetUpdateBlock(sheetUpdate) {
   `;
 }
 
-// يبني كل صفوف الحقول (الأساسية + الإضافية الديناميكية) على حسب نوع القرار المستخرج
 function renderResultFields(data, disabled = true) {
   const resultFields = document.getElementById('resultFields');
   if (!resultFields) return;
@@ -277,7 +274,6 @@ function toggleEditMode() {
     if (editBtn) editBtn.textContent = 'Cancel';
     toast('وضع التعديل مفعل، عدل ما تريد ثم اضغط Save', 'info');
   } else {
-    // إلغاء التعديل: إعادة بناء الحقول من آخر بيانات محفوظة
     renderResultFields(currentExtractedData, true);
     if (editBtn) editBtn.textContent = 'Edit';
     toast('تم إلغاء التعديل', 'info');

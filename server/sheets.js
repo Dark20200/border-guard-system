@@ -11,12 +11,6 @@ const __dirname = path.dirname(__filename);
 const SPREADSHEET_ID = process.env.GOOGLE_SHEET_ID;
 const CREDENTIALS_PATH = path.join(__dirname, '..', 'data', 'system', 'credentials.json');
 
-// على Render (وأي استضافة سحابية) مفيش ملف credentials.json فعليًا (متعمد - الملف
-// ده حساس ومش بيترفع على GitHub). لازم تحط *محتوى* الملف كامل كمتغير بيئة.
-// أفضل طريقة: GOOGLE_SERVICE_ACCOUNT_BASE64 (نسخة Base64 من الملف - آمنة من أي
-// تقصيص أو غلط وقت اللصق لأنها حروف وأرقام بس من غير علامات تنصيص أو أسطر).
-// أو بديل: GOOGLE_SERVICE_ACCOUNT_JSON (نص الملف الخام - أكتر عرضة للتقصيص).
-// على جهازك محليًا، بيستخدم الملف عادي لو موجود.
 function getGoogleCredentials() {
     if (process.env.GOOGLE_SERVICE_ACCOUNT_BASE64) {
         const decoded = Buffer.from(process.env.GOOGLE_SERVICE_ACCOUNT_BASE64, 'base64').toString('utf8');
@@ -34,7 +28,6 @@ function getGoogleCredentials() {
 async function getSheetsClient() {
     const auth = new google.auth.GoogleAuth({
         credentials: getGoogleCredentials(),
-        // Read + Write - محتاجين الكتابة عشان نقدر نحدّث الاسم في الشيت من الموقع
         scopes: ['https://www.googleapis.com/auth/spreadsheets'],
     });
     const client = await auth.getClient();
@@ -62,22 +55,18 @@ export async function getSheetData(range = 'A:Z') {
     }
 }
 
-// بتدور على رقم الصف بتاع عسكري معين في الشيت (عشان نقدر نحدّث خلاياه)
-// بترجع null لو مالقتوش
 async function findRowNumberByDiscordId(discordId) {
     const rows = await getSheetData('A:A');
     const cleanTargetId = String(discordId).replace(/[^0-9]/g, '');
     for (let i = 0; i < rows.length; i++) {
         const cleanSheetId = rows[i][0] ? String(rows[i][0]).replace(/[^0-9]/g, '') : '';
         if (cleanSheetId && cleanSheetId === cleanTargetId) {
-            return i + 1; // أرقام صفوف الشيت بتبدأ من 1 مش 0
+            return i + 1; 
         }
     }
     return null;
 }
 
-// بتحدّث اسم (وكود لو اتبعت) العسكري في عمودي C و D في الشيت مباشرة.
-// بتترجع true لو نجحت، false لو العسكري مش موجود في الشيت أو حصل خطأ.
 export async function updateCharacterNameInSheet(discordId, newName, newCode = null) {
     try {
         const rowNumber = await findRowNumberByDiscordId(discordId);
