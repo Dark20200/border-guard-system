@@ -13,6 +13,7 @@ import { setupAuth } from './server/auth.js';
 import { setupApiRoutes } from './server/api.js';
 import { getSheetData, getCharacterNameFromSheet, getRankFromSheet } from './server/sheets.js';
 import { getRecordsCollection } from './server/mongo.js';
+import { sendPrivateAlert } from './server/discordBot.js';
 
 dotenv.config();
 
@@ -122,6 +123,7 @@ async function getSheetMap() {
         });
     } catch (e) {
         console.error('تعذر تحميل بيانات الشيت:', e.message);
+        sendPrivateAlert(`خطأ في جلب بيانات جوجل شيت: ${e.message}`);
     }
     sheetCache = { data: map, at: now };
     return map;
@@ -188,6 +190,7 @@ app.get('/api/stats', async (req, res) => {
         });
     } catch (error) {
         console.error("خطأ في جلب الإحصائيات:", error);
+        sendPrivateAlert(`خطأ في جلب الإحصائيات: ${error.message}`);
         res.status(500).json({ success: false, message: "خطأ في السيرفر" });
     }
 });
@@ -205,6 +208,7 @@ app.get('/api/search', async (req, res) => {
         res.json({ success: true, data: await enrichRecords(matched) });
     } catch (error) {
         console.error("خطأ في البحث:", error);
+        sendPrivateAlert(`خطأ في البحث: ${error.message}`);
         res.status(500).json({ success: false, message: "فشل البحث في السجلات" });
     }
 });
@@ -258,6 +262,7 @@ app.get('/api/records', async (req, res) => {
         });
     } catch (error) {
         console.error("خطأ في جلب السجلات:", error);
+        sendPrivateAlert(`خطأ في جلب السجلات: ${error.message}`);
         res.status(500).json({ success: false, message: "فشل جلب السجلات" });
     }
 });
@@ -310,6 +315,7 @@ app.get('/api/soldiers', async (req, res) => {
         res.json({ success: true, data: filtered.slice(start, start + limitNum), total, page: pageNum, limit: limitNum, totalPages });
     } catch (error) {
         console.error("خطأ في جلب قائمة الأعضاء:", error);
+        sendPrivateAlert(`خطأ في جلب قائمة الأعضاء: ${error.message}`);
         res.status(500).json({ success: false, message: "فشل جلب قائمة الأعضاء" });
     }
 });
@@ -348,6 +354,7 @@ app.get('/api/soldiers/:id', async (req, res) => {
         res.json({ success: true, id: soldierId, rpName, rank, totalRecords: records.length, typesCount, data: records });
     } catch (error) {
         console.error("خطأ في جلب بيانات العسكري:", error);
+        sendPrivateAlert(`خطأ في جلب بيانات العسكري: ${error.message}`);
         res.status(500).json({ success: false, message: "فشل جلب بيانات العسكري" });
     }
 });
