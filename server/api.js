@@ -147,7 +147,7 @@ export function setupApiRoutes(app) {
             const decisionTypesList = ["الاستدعاء", "المكافأة", "الفصل", "قبول", "عقوبة", "تحذير", "إجازة", "استقالة", "تحديث اكواد", "تغير هوية"];
 
             const completion = await groq.chat.completions.create({
-                model: "llama-3.1-8b-instant",
+                model: "openai/gpt-oss-120b",
                 messages: [
                     {
                         role: "system",
