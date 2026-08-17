@@ -255,6 +255,9 @@ function switchTab(tabName) {
   if (isAdmin && typeof loadAdminRequests === 'function') {
     loadAdminRequests();
   }
+  if (isRewards && typeof loadRewardsPanel === 'function') {
+    loadRewardsPanel();
+  }
 }
 
 function renderHomeSection(data, canManageRequests = false) {
@@ -304,7 +307,8 @@ function renderHomeSection(data, canManageRequests = false) {
           </div>
 
           ${canManageRequests ? `
-          <div onclick="switchTab('rewards')" class="card p-5 cursor-pointer hover:border-amber-500/50 transition-all group flex flex-col justify-between">
+          <div class="md:col-span-2 flex justify-center">
+          <div onclick="switchTab('rewards')" class="card p-5 cursor-pointer hover:border-amber-500/50 transition-all group flex flex-col justify-between w-full md:w-[calc(50%-0.5rem)]">
             <div>
               <div class="w-10 h-10 rounded-lg bg-amber-500/10 text-amber-400 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">${ICONS.gift}</div>
               <h3 class="text-sm font-bold mb-1 text-[color:var(--text)]">وحدة تحكم المستحقات</h3>
@@ -313,6 +317,7 @@ function renderHomeSection(data, canManageRequests = false) {
             <div class="mt-4 pt-3 border-t border-[color:var(--line)] text-xs text-amber-400 font-medium flex items-center justify-between">
               <span>فتح اللوحة</span><span>←</span>
             </div>
+          </div>
           </div>` : ''}
         </div>
       </div>

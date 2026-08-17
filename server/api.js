@@ -2,7 +2,7 @@ import { Groq } from 'groq-sdk';
 import { ObjectId } from 'mongodb';
 import { getUsersDB, saveUsersDB, canManageAdmin, OWNER_DISCORD_ID } from './db.js';
 import { getSheetData, getCharacterNameFromSheet, getRankFromSheet, getPermFromSheet, updateCharacterNameInSheet } from './sheets.js';
-import { getRecordsCollection } from './mongo.js';
+import { getRecordsCollection, getDoorSessionsCollection } from './mongo.js';
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
@@ -340,6 +340,13 @@ export function setupApiRoutes(app) {
             const data = docs.map(d => {
                 const info = sheetMap[d.soldierId];
                 const soldierDisplay = info && info.name ? (info.code ? `[${info.code}] ${info.name}` : info.name) : d.soldierId;
+
+                const officerId = d.officer ? String(d.officer).replace(/[^0-9]/g, '') : '';
+                const officerInfo = officerId ? sheetMap[officerId] : null;
+                const officerDisplay = officerInfo && officerInfo.name
+                    ? (officerInfo.code ? `[${officerInfo.code}] ${officerInfo.name}` : officerInfo.name)
+                    : (officerId || d.officer);
+
                 const savedTime = d.savedAt ? new Date(d.savedAt).getTime() : 0;
 
                 let status = 'pending';
@@ -350,7 +357,8 @@ export function setupApiRoutes(app) {
                     id: String(d._id),
                     soldierId: d.soldierId,
                     soldierDisplay,
-                    officer: d.officer,
+                    officerId,
+                    officerDisplay,
                     reason: d.reason,
                     date: d.date,
                     savedAt: d.savedAt,
@@ -386,6 +394,105 @@ export function setupApiRoutes(app) {
         } catch (error) {
             console.error("خطأ في تسجيل تسليم المكافأة:", error);
             res.status(500).json({ success: false, error: 'فشل تسجيل التسليم' });
+        }
+    });
+
+    // حالة الباب: مفتوح لو فيه سيشن مسجل بدون تاريخ إغلاق
+    app.get('/api/rewards/door-status', async (req, res) => {
+        if (!req.isAuthenticated() || !(await canManageAdmin(req.user.id))) {
+            return res.status(403).json({ error: 'غير مصرح لك' });
+        }
+        try {
+            const col = await getDoorSessionsCollection();
+            const openSession = await col.findOne({ closedAt: null });
+            res.json({
+                success: true,
+                isOpen: Boolean(openSession),
+                session: openSession ? {
+                    id: String(openSession._id),
+                    openedAt: openSession.openedAt,
+                    openedBy: openSession.openedBy,
+                    openedById: openSession.openedById
+                } : null
+            });
+        } catch (error) {
+            console.error("خطأ في جلب حالة باب المستحقات:", error);
+            res.status(500).json({ success: false, error: 'فشل جلب حالة الباب' });
+        }
+    });
+
+    // فتح باب المستحقات (بيتقفل تلقائيًا أي جلسة قديمة متفتوحة غلط لو موجودة)
+    app.post('/api/rewards/door/open', async (req, res) => {
+        if (!req.isAuthenticated() || !(await canManageAdmin(req.user.id))) {
+            return res.status(403).json({ error: 'غير مصرح لك' });
+        }
+        try {
+            const col = await getDoorSessionsCollection();
+            const now = new Date().toISOString();
+
+            const existing = await col.findOne({ closedAt: null });
+            if (existing) {
+                return res.json({ success: true, alreadyOpen: true });
+            }
+
+            await col.insertOne({
+                openedAt: now,
+                openedBy: req.user.username,
+                openedById: req.user.id,
+                closedAt: null,
+                closedBy: null,
+                closedById: null
+            });
+
+            res.json({ success: true });
+        } catch (error) {
+            console.error("خطأ في فتح باب المستحقات:", error);
+            res.status(500).json({ success: false, error: 'فشل فتح الباب' });
+        }
+    });
+
+    // غلق باب المستحقات
+    app.post('/api/rewards/door/close', async (req, res) => {
+        if (!req.isAuthenticated() || !(await canManageAdmin(req.user.id))) {
+            return res.status(403).json({ error: 'غير مصرح لك' });
+        }
+        try {
+            const col = await getDoorSessionsCollection();
+            const result = await col.updateOne(
+                { closedAt: null },
+                { $set: { closedAt: new Date().toISOString(), closedBy: req.user.username, closedById: req.user.id } }
+            );
+            if (result.matchedCount === 0) {
+                return res.json({ success: true, alreadyClosed: true });
+            }
+            res.json({ success: true });
+        } catch (error) {
+            console.error("خطأ في غلق باب المستحقات:", error);
+            res.status(500).json({ success: false, error: 'فشل غلق الباب' });
+        }
+    });
+
+    // سجل كل مرات فتح/غلق الباب (بيظهر لما الباب يكون مقفول)
+    app.get('/api/rewards/door-history', async (req, res) => {
+        if (!req.isAuthenticated() || !(await canManageAdmin(req.user.id))) {
+            return res.status(403).json({ error: 'غير مصرح لك' });
+        }
+        try {
+            const col = await getDoorSessionsCollection();
+            const sessions = await col.find({}).sort({ openedAt: -1 }).toArray();
+            const data = sessions.map(s => ({
+                id: String(s._id),
+                openedAt: s.openedAt,
+                openedBy: s.openedBy,
+                openedById: s.openedById || '',
+                closedAt: s.closedAt,
+                closedBy: s.closedBy,
+                closedById: s.closedById || ''
+            }));
+            res.json({ success: true, data });
+        } catch (error) {
+            console.error("خطأ في جلب سجل باب المستحقات:", error);
+            res.status(500).json({ success: false, error: 'فشل جلب سجل الفتح والغلق' });
         }
     });
 }

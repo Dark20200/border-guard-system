@@ -30,3 +30,8 @@ export async function getUsersCollection() {
     const db = await getDb();
     return db.collection('users');
 }
+
+export async function getDoorSessionsCollection() {
+    const db = await getDb();
+    return db.collection('door_sessions');
+}
