@@ -1,9 +1,34 @@
 import { Groq } from 'groq-sdk';
+import { ObjectId } from 'mongodb';
 import { getUsersDB, saveUsersDB, canManageAdmin, OWNER_DISCORD_ID } from './db.js';
 import { getSheetData, getCharacterNameFromSheet, getRankFromSheet, getPermFromSheet, updateCharacterNameInSheet } from './sheets.js';
 import { getRecordsCollection } from './mongo.js';
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+
+// كاش بسيط لأسماء/أكواد الشيت خاص بلوحة المستحقات (دقيقة واحدة)
+let rewardsSheetCache = { data: null, at: 0 };
+async function getRewardsSheetMap() {
+    const now = Date.now();
+    if (rewardsSheetCache.data && (now - rewardsSheetCache.at) < 60000) return rewardsSheetCache.data;
+    const map = {};
+    try {
+        const rows = await getSheetData('A:E');
+        (rows || []).forEach(row => {
+            const cleanId = row[0] ? String(row[0]).replace(/[^0-9]/g, '') : '';
+            if (cleanId) {
+                map[cleanId] = {
+                    name: row[2] ? String(row[2]).trim() : '',
+                    code: row[3] ? String(row[3]).trim() : ''
+                };
+            }
+        });
+    } catch (e) {
+        console.error('تعذر تحميل بيانات الشيت لوحدة المستحقات:', e.message);
+    }
+    rewardsSheetCache = { data: map, at: now };
+    return map;
+}
 
 export function setupApiRoutes(app) {
     app.get('/api/sheet-data', async (req, res) => {
@@ -295,6 +320,72 @@ export function setupApiRoutes(app) {
         } catch (error) {
             console.error("خطأ في حفظ القرار:", error);
             res.status(500).json({ success: false, error: 'فشل حفظ القرار في النظام' });
+        }
+    });
+
+    // ===================== وحدة تحكم المستحقات (المكافآت) =====================
+    const FOUR_DAYS_MS = 4 * 24 * 60 * 60 * 1000;
+
+    // "فتح باب المستحقات": بيجيب كل سجلات المكافآت بس (type = المكافأة)
+    app.get('/api/rewards', async (req, res) => {
+        if (!req.isAuthenticated() || !(await canManageAdmin(req.user.id))) {
+            return res.status(403).json({ error: 'غير مصرح لك' });
+        }
+        try {
+            const col = await getRecordsCollection();
+            const docs = await col.find({ type: 'المكافأة' }).sort({ savedAt: -1 }).toArray();
+            const sheetMap = await getRewardsSheetMap();
+            const now = Date.now();
+
+            const data = docs.map(d => {
+                const info = sheetMap[d.soldierId];
+                const soldierDisplay = info && info.name ? (info.code ? `[${info.code}] ${info.name}` : info.name) : d.soldierId;
+                const savedTime = d.savedAt ? new Date(d.savedAt).getTime() : 0;
+
+                let status = 'pending';
+                if (d.status === 'delivered') status = 'delivered';
+                else if (savedTime && (now - savedTime) > FOUR_DAYS_MS) status = 'expired';
+
+                return {
+                    id: String(d._id),
+                    soldierId: d.soldierId,
+                    soldierDisplay,
+                    officer: d.officer,
+                    reason: d.reason,
+                    date: d.date,
+                    savedAt: d.savedAt,
+                    extraFields: d.extraFields || [],
+                    status,
+                    deliveredAt: d.deliveredAt || null,
+                    deliveredBy: d.deliveredBy || null
+                };
+            });
+
+            res.json({ success: true, data });
+        } catch (error) {
+            console.error("خطأ في جلب المستحقات:", error);
+            res.status(500).json({ success: false, error: 'فشل جلب سجلات المستحقات' });
+        }
+    });
+
+    // تسجيل تسليم مكافأة معينة (بتفضل ظاهرة بعلامة "تم التسليم" بدل الزرار)
+    app.post('/api/rewards/:id/deliver', async (req, res) => {
+        if (!req.isAuthenticated() || !(await canManageAdmin(req.user.id))) {
+            return res.status(403).json({ error: 'غير مصرح لك' });
+        }
+        try {
+            const col = await getRecordsCollection();
+            const result = await col.updateOne(
+                { _id: new ObjectId(req.params.id) },
+                { $set: { status: 'delivered', deliveredAt: new Date().toISOString(), deliveredBy: req.user.username } }
+            );
+            if (result.matchedCount === 0) {
+                return res.status(404).json({ success: false, error: 'المكافأة غير موجودة' });
+            }
+            res.json({ success: true });
+        } catch (error) {
+            console.error("خطأ في تسجيل تسليم المكافأة:", error);
+            res.status(500).json({ success: false, error: 'فشل تسجيل التسليم' });
         }
     });
 }
